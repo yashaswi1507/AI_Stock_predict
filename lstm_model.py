@@ -1,43 +1,55 @@
+# LSTM replaced with GradientBoostingRegressor
+# Reason: TensorFlow Python 3.14 support nahi karta (Streamlit Cloud)
+# GBR accuracy almost same hai sequence prediction ke liye
+
 import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+import pandas as pd
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import MinMaxScaler
 
-def prepare_lstm_data(df):
+
+def prepare_lstm_data(df, lookback=10):
+    """
+    Last `lookback` days ka data features mein convert karo.
+    Har row = [close_t-n, ..., close_t-1] → target = close_t
+    """
     scaler = MinMaxScaler()
-    data = scaler.fit_transform(df[['Close']])
+    prices = scaler.fit_transform(df[['Close']].values)
 
     X, y = [], []
-
-    for i in range(60, len(data)):
-        X.append(data[i-60:i])
-        y.append(data[i])
+    for i in range(lookback, len(prices)):
+        X.append(prices[i - lookback:i].flatten())
+        y.append(prices[i][0])
 
     return np.array(X), np.array(y), scaler
 
 
 def train_lstm(X, y):
-    model = Sequential()
+    """GradientBoosting model train karo"""
+    if len(X) < 20:
+        return None
 
-    model.add(LSTM(64, return_sequences=True, input_shape=(X.shape[1], 1)))
-    model.add(Dropout(0.2))
-
-    model.add(LSTM(64))
-    model.add(Dropout(0.2))
-
-    model.add(Dense(1))
-
-    model.compile(optimizer='adam', loss='mse')
-    model.fit(X, y, epochs=5, batch_size=32)
-
+    model = GradientBoostingRegressor(
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=4,
+        random_state=42
+    )
+    model.fit(X, y)
     return model
 
 
-def predict_lstm(model, df, scaler):
-    last_60 = df[['Close']].tail(60)
-    scaled = scaler.transform(last_60)
+def predict_lstm(model, df, scaler, lookback=10):
+    """Next price predict karo"""
+    if model is None:
+        return None
 
-    X_test = np.array([scaled])
-    pred = model.predict(X_test)
-
-    return scaler.inverse_transform(pred)[0][0]
+    try:
+        prices = scaler.transform(df[['Close']].tail(lookback).values)
+        X_test = prices.flatten().reshape(1, -1)
+        pred_scaled = model.predict(X_test)
+        pred_price = scaler.inverse_transform([[pred_scaled[0]]])[0][0]
+        return float(pred_price)
+    except Exception as e:
+        print(f"[GBR Predict] Error: {e}")
+        return None
