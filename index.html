@@ -585,7 +585,6 @@
   }
 
   iframe {
-    min-height: 100vh;
     width: 100%;
     height: 800px;
     border: none;
@@ -1000,16 +999,17 @@
       <span class="embed-tag">POWERED BY STREAMLIT</span>
     </div>
 
-    <!-- 
-      👇 Apna Streamlit URL yahan daalo
-      Example: <iframe src="https://your-app.streamlit.app/?embed=true" ...></iframe>
-    -->
     <iframe 
       src="https://aistockpredict-hhxtjuawdnmqrla47qtwde.streamlit.app/?embed=true"
       width="100%"
-      height: 90vh;
+      height="800px"
       style="border:none;display:block;">
     </iframe>
+      <p>Streamlit app yahan embed hoga</p>
+      <p>Replace this div with:</p>
+      <code>&lt;iframe src="https://your-app.streamlit.app/?embed=true"&gt;&lt;/iframe&gt;</code>
+    </div>
+  </div>
 </section>
 
 <!-- ── PRICING ── -->
@@ -1070,7 +1070,7 @@
         <li>White-label option</li>
         <li>SLA guarantee</li>
       </ul>
-      <a href="mailto:hello@quantedge.in" class="plan-btn outline">Contact Us</a>
+      <a href="/cdn-cgi/l/email-protection#ee868b828281ae9f9b8f809a8b8a898bc08780" class="plan-btn outline">Contact Us</a>
     </div>
   </div>
 </section>
@@ -1082,22 +1082,44 @@
   <p style="font-family:var(--mono);font-size:11px">v2.0 · 2025</p>
 </footer>
 
-<script>
-// ── TICKER DATA ──
-const tickers = [
-  { sym:'RELIANCE', price:'2,847.30', chg:'+1.24', up:true },
-  { sym:'TCS',      price:'3,912.50', chg:'+0.87', up:true },
-  { sym:'INFY',     price:'1,456.20', chg:'-0.43', up:false },
-  { sym:'HDFCBANK', price:'1,678.90', chg:'+0.62', up:true },
-  { sym:'WIPRO',    price:'489.75',   chg:'-0.91', up:false },
-  { sym:'SBIN',     price:'623.40',   chg:'+1.83', up:true },
-  { sym:'ICICIBANK',price:'1,089.60', chg:'+0.55', up:true },
-  { sym:'TATASTEEL',price:'143.25',   chg:'-1.12', up:false },
-  { sym:'BAJFINANCE',price:'6,834.00',chg:'+0.38', up:true },
-  { sym:'MARUTI',   price:'10,234.50',chg:'-0.22', up:false },
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+// ── LIVE TICKER ──
+const SYMBOLS = ['RELIANCE','TCS','INFY','HDFCBANK','WIPRO','SBIN','ICICIBANK','TATASTEEL','BAJFINANCE','MARUTI'];
+
+// NSE quote fetch via yfinance proxy (allorigins to bypass CORS)
+async function fetchPrice(sym) {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${sym}.NS?interval=1d&range=1d`;
+    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxy, { signal: AbortSignal.timeout(5000) });
+    const outer = await res.json();
+    const data = JSON.parse(outer.contents);
+    const q = data?.chart?.result?.[0]?.meta;
+    if (!q) return null;
+    const price = q.regularMarketPrice || q.previousClose;
+    const prev  = q.previousClose || price;
+    const chg   = ((price - prev) / prev * 100).toFixed(2);
+    return { sym, price: price.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}), chg, up: price >= prev };
+  } catch(e) {
+    return null;
+  }
+}
+
+// Fallback static data
+const FALLBACK = [
+  { sym:'RELIANCE', price:'2,847.30', chg:'1.24', up:true },
+  { sym:'TCS',      price:'3,912.50', chg:'0.87', up:true },
+  { sym:'INFY',     price:'1,456.20', chg:'0.43', up:false },
+  { sym:'HDFCBANK', price:'1,678.90', chg:'0.62', up:true },
+  { sym:'WIPRO',    price:'489.75',   chg:'0.91', up:false },
+  { sym:'SBIN',     price:'623.40',   chg:'1.83', up:true },
+  { sym:'ICICIBANK',price:'1,089.60', chg:'0.55', up:true },
+  { sym:'TATASTEEL',price:'143.25',   chg:'1.12', up:false },
+  { sym:'BAJFINANCE',price:'6,834.00',chg:'0.38', up:true },
+  { sym:'MARUTI',   price:'10,234.50',chg:'0.22', up:false },
 ];
 
-function buildTicker() {
+function renderTicker(tickers) {
   const track = document.getElementById('ticker');
   const doubled = [...tickers, ...tickers];
   track.innerHTML = doubled.map(t => `
@@ -1107,6 +1129,29 @@ function buildTicker() {
       <span class="${t.up ? 'up' : 'dn'}">${t.up ? '▲' : '▼'} ${t.chg}%</span>
     </span>
   `).join('');
+}
+
+async function buildTicker() {
+  // Show fallback first (instant)
+  renderTicker(FALLBACK);
+
+  // Then fetch live prices
+  try {
+    const results = await Promise.allSettled(SYMBOLS.map(fetchPrice));
+    const live = results
+      .filter(r => r.status === 'fulfilled' && r.value)
+      .map(r => r.value);
+
+    if (live.length >= 5) {
+      renderTicker(live);
+      console.log(`[Ticker] Live: ${live.length}/${SYMBOLS.length} stocks`);
+    }
+  } catch(e) {
+    console.log('[Ticker] Using fallback data');
+  }
+
+  // Refresh every 60 seconds
+  setInterval(buildTicker, 60000);
 }
 
 // ── FAKE CANDLES ──
@@ -1150,15 +1195,4 @@ function initReveal() {
       if (e.isIntersecting) {
         setTimeout(() => e.target.classList.add('visible'), i * 80);
         obs.unobserve(e.target);
-      }
-    });
-  }, { threshold: 0.1 });
-  els.forEach(el => obs.observe(el));
-}
-
-buildTicker();
-buildCandles();
-initReveal();
-</script>
-</body>
-</html>
+     

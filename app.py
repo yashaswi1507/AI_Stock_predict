@@ -343,6 +343,10 @@ if "paper" not in st.session_state:
     st.session_state.paper = init_paper()
 if "analyzed_stocks" not in st.session_state:
     st.session_state.analyzed_stocks = []
+if "analysis_cache" not in st.session_state:
+    st.session_state.analysis_cache = {}  # stock → {df, pred, lstm, news, res}
+if "price_refresh_only" not in st.session_state:
+    st.session_state.price_refresh_only = False
 
 # ── TOP BAR ──
 st.markdown("""
@@ -416,14 +420,22 @@ if analyze_clicked:
         normalized.append(s.strip().upper())
     st.session_state.analyzed_stocks = normalized
 
-if analyze_clicked and st.session_state.analyzed_stocks:
-    tf_map = {
-        "1 Day (5m)":   ("1d",  "5m"),
-        "5 Days (15m)": ("5d",  "15m"),
-        "1 Month (1h)": ("1mo", "1h"),
-        "3 Month (1d)": ("3mo", "1d"),
-    }
-    period, interval = tf_map[timeframe]
+tf_map = {
+    "1 Day (5m)":   ("1d",  "5m"),
+    "5 Days (15m)": ("5d",  "15m"),
+    "1 Month (1h)": ("1mo", "1h"),
+    "3 Month (1d)": ("3mo", "1d"),
+}
+period, interval = tf_map[timeframe]
+
+# Run full analysis only on first click OR if not price_refresh_only
+run_full = analyze_clicked or (
+    st.session_state.get("price_refresh_only") and 
+    st.session_state.get("analyzed_stocks")
+)
+
+if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.session_state.analyzed_stocks:
+    is_refresh = st.session_state.get("price_refresh_only", False)
 
     for stock in st.session_state.analyzed_stocks:
 
@@ -439,6 +451,13 @@ if analyze_clicked and st.session_state.analyzed_stocks:
         # ── FETCH DATA ──
         with st.spinner(f"Fetching {stock}..."):
             df, source = get_live_data(stock, period=period, interval=interval)
+        
+        # Cache df for refresh
+        if df is not None:
+            if stock not in st.session_state.analysis_cache:
+                st.session_state.analysis_cache[stock] = {}
+            st.session_state.analysis_cache[stock]['df'] = df
+            st.session_state.analysis_cache[stock]['interval'] = interval
 
         if df is None:
             st.error(f"❌ Data unavailable for {stock}")
@@ -561,6 +580,9 @@ if analyze_clicked and st.session_state.analyzed_stocks:
 
             st.plotly_chart(fig, use_container_width=True)
 
+        # On refresh — use cached ML results
+        cache = st.session_state.analysis_cache.get(stock, {})
+        
         with right_col:
             # ── LIVE PRICE ──
             live = get_current_price(stock)
@@ -592,13 +614,20 @@ if analyze_clicked and st.session_state.analyzed_stocks:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # ── AI SIGNAL ──
-            X, y = prepare_data(df)
-            m, acc = train_model(X, y)
-            pred = predict(m, df)
+            # ── AI SIGNAL — use cache on refresh ──
+            if is_refresh and 'pred' in cache:
+                pred = cache['pred']
+                current_price = cache.get('current_price', float(df['Close'].iloc[-1]))
+            else:
+                X, y = prepare_data(df)
+                m, acc = train_model(X, y)
+                pred = predict(m, df)
+                current_price = float(df['Close'].iloc[-1])
+                if stock in st.session_state.analysis_cache:
+                    st.session_state.analysis_cache[stock]['pred'] = pred
+                    st.session_state.analysis_cache[stock]['current_price'] = current_price
 
             if pred is not None:
-                current_price = float(df['Close'].iloc[-1])
                 is_buy = pred > current_price
                 signal_class = "signal-buy" if is_buy else "signal-sell"
                 signal_text_class = "signal-text-buy" if is_buy else "signal-text-sell"
@@ -641,27 +670,47 @@ if analyze_clicked and st.session_state.analyzed_stocks:
         tab1, tab2, tab3, tab4 = st.tabs(["🧠 Deep Learning", "📰 News", "📉 Backtest", "💹 Paper Trade"])
 
         with tab1:
-            df_long = get_long_data(stock)
-            if df_long is None or len(df_long) < 60:
-                st.warning("Need 60+ days data for deep learning prediction")
+            # Use cached LSTM result on refresh
+            if is_refresh and 'lstm_price' in cache:
+                lstm_price = cache['lstm_price']
+                curr = float(df['Close'].iloc[-1])
+                is_up = lstm_price > curr
+                diff = lstm_price - curr
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("GBR Predicted Price", f"₹{lstm_price:,.2f}", f"{diff:+.2f}")
+                col_b.metric("Current Price", f"₹{curr:,.2f}")
+                col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
+                st.caption("📦 Cached — Re-analyze to retrain")
             else:
-                with st.spinner("Training model..."):
-                    Xl, yl, scaler = prepare_lstm_data(df_long)
-                    lstm_m = train_lstm(Xl, yl)
-                    lstm_price = predict_lstm(lstm_m, df_long, scaler)
-                if lstm_price:
-                    curr = float(df['Close'].iloc[-1])
-                    is_up = lstm_price > curr
-                    diff = lstm_price - curr
-                    col_a, col_b, col_c = st.columns(3)
-                    col_a.metric("GBR Predicted Price", f"₹{lstm_price:,.2f}", f"{diff:+.2f}")
-                    col_b.metric("Current Price", f"₹{curr:,.2f}")
-                    col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
+                df_long = get_long_data(stock)
+                if df_long is None or len(df_long) < 60:
+                    st.warning("Need 60+ days data for deep learning prediction")
+                else:
+                    with st.spinner("Training model..."):
+                        Xl, yl, scaler = prepare_lstm_data(df_long)
+                        lstm_m = train_lstm(Xl, yl)
+                        lstm_price = predict_lstm(lstm_m, df_long, scaler)
+                    if lstm_price:
+                        curr = float(df['Close'].iloc[-1])
+                        is_up = lstm_price > curr
+                        diff = lstm_price - curr
+                        col_a, col_b, col_c = st.columns(3)
+                        col_a.metric("GBR Predicted Price", f"₹{lstm_price:,.2f}", f"{diff:+.2f}")
+                        col_b.metric("Current Price", f"₹{curr:,.2f}")
+                        col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
+                        if stock in st.session_state.analysis_cache:
+                            st.session_state.analysis_cache[stock]['lstm_price'] = lstm_price
 
         with tab2:
-            with st.spinner("Fetching news..."):
-                news = fetch_news(stock)
-            res = analyze_news(news)
+            # Use cached news on refresh
+            if is_refresh and 'news_res' in cache:
+                res = cache['news_res']
+            else:
+                with st.spinner("Fetching news..."):
+                    news = fetch_news(stock)
+                res = analyze_news(news)
+                if stock in st.session_state.analysis_cache:
+                    st.session_state.analysis_cache[stock]['news_res'] = res
 
             news_html = '<div class="card"><div class="card-title">Latest News Sentiment</div>'
             for item in res:
@@ -742,20 +791,29 @@ if analyze_clicked and st.session_state.analyzed_stocks:
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
-# ── AUTO REFRESH ──
+# ── AUTO REFRESH (sirf price + chart, baaki cached) ──
 if auto_refresh and st.session_state.get("analyzed_stocks"):
     if is_market_open():
         countdown_placeholder = st.empty()
         for i in range(refresh_interval, 0, -1):
             countdown_placeholder.markdown(f"""
-            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;text-align:center;padding:8px;">
-                🔄 Auto refresh in {i}s
+            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;
+                        text-align:center;padding:8px;background:#0d1117;border-radius:6px;
+                        border:1px solid rgba(255,255,255,0.05);">
+                🔄 Price refresh in {i}s &nbsp;·&nbsp; ML/News cached
             </div>""", unsafe_allow_html=True)
             _time.sleep(1)
         countdown_placeholder.empty()
+        # ✅ KEY FIX: set flag so only price+chart refreshes
+        st.session_state.price_refresh_only = True
         st.rerun()
     else:
         st.markdown("""
-        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;text-align:center;padding:8px;">
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;
+                    text-align:center;padding:8px;">
             🔴 Auto refresh paused — Market closed (9:15 AM – 3:30 PM IST)
         </div>""", unsafe_allow_html=True)
+
+# Reset refresh flag after use
+if st.session_state.get("price_refresh_only"):
+    st.session_state.price_refresh_only = False
