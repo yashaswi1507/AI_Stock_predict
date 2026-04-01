@@ -1,6 +1,16 @@
 import streamlit as st
-
 import plotly.graph_objects as go
+import nltk
+
+# TextBlob ke liye NLTK data — Streamlit Cloud pe ek baar download hoga
+try:
+    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
+    nltk.download('averaged_perceptron_tagger', quiet=True)
+    nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+    nltk.download('brown', quiet=True)
+except Exception:
+    pass
 
 from data import get_data, get_long_data, get_live_data, clean_df, add_indicators
 from live_price import get_current_price

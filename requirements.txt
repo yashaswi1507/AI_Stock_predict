@@ -5,6 +5,7 @@ numpy
 scikit-learn
 ta
 plotly
-transformers
+textblob
+nltk
 requests
 pytz
