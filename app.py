@@ -1,8 +1,10 @@
 import streamlit as st
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import time as _time
+import pytz
 import nltk
 
-# TextBlob ke liye NLTK data — Streamlit Cloud pe ek baar download hoga
 try:
     nltk.download('punkt', quiet=True)
     nltk.download('punkt_tab', quiet=True)
@@ -13,7 +15,7 @@ except Exception:
     pass
 
 from data import get_data, get_long_data, get_live_data, clean_df, add_indicators
-from live_price import get_current_price
+from live_price import get_current_price, is_market_open
 from model import prepare_data, train_model, predict, risk_score
 from lstm_model import prepare_lstm_data, train_lstm, predict_lstm
 from news import fetch_news, analyze_news, overall_sentiment
@@ -22,428 +24,738 @@ from portfolio import init_portfolio, add_stock, calculate
 from paper_trading import init_paper, buy, sell
 from backtest import run_backtest
 
-st.set_page_config(layout="wide")
+# ── PAGE CONFIG ──
+st.set_page_config(
+    page_title="QuantEdge — AI Trading",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
+# ── GLOBAL CSS ──
 st.markdown("""
 <style>
-.main { background-color: #0e1117; }
-.stButton>button {
-    width: 100%;
-    border-radius: 10px;
-    background-color: #4CAF50;
-    color: white;
-    font-size: 16px;
-    height: 45px;
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap');
+
+/* ── BASE ── */
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+    background-color: #080b10;
+    color: #e8edf5;
 }
-.stTextInput>div>div>input { border-radius: 10px; }
-.stSelectbox label { font-size: 18px; font-weight: bold; }
+
+.main .block-container {
+    padding: 0 2rem 2rem 2rem;
+    max-width: 1400px;
+}
+
+/* ── HIDE STREAMLIT DEFAULTS ── */
+#MainMenu { visibility: hidden; }
+footer { visibility: hidden; }
+header { visibility: hidden; }
+
+/* ── TOP BAR ── */
+.top-bar {
+    background: rgba(8,11,16,0.95);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 14px 0 10px 0;
+    margin-bottom: 24px;
+}
+
+.top-bar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.logo-text {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    color: #e8edf5;
+    letter-spacing: -0.5px;
+}
+
+.logo-text span { color: #00e5a0; }
+
+/* ── TICKER ── */
+.ticker-wrap {
+    background: #0d1117;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    padding: 8px 16px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.ticker-inner {
+    display: flex;
+    gap: 32px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.ticker-inner::-webkit-scrollbar { display: none; }
+
+.t-sym { color: #5a6880; }
+.t-price { color: #e8edf5; font-weight: 700; }
+.t-up { color: #00e5a0; }
+.t-dn { color: #ff4560; }
+
+/* ── SECTION CARDS ── */
+.card {
+    background: #0d1117;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+}
+
+.card-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: #5a6880;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.card-title::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #00e5a0;
+}
+
+/* ── LIVE PRICE CARD ── */
+.price-main {
+    font-family: 'Syne', sans-serif;
+    font-size: 40px;
+    font-weight: 800;
+    color: #e8edf5;
+    letter-spacing: -1px;
+    line-height: 1;
+}
+
+.price-change-up {
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    color: #00e5a0;
+    margin-top: 4px;
+}
+
+.price-change-dn {
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    color: #ff4560;
+    margin-top: 4px;
+}
+
+.price-meta {
+    font-size: 11px;
+    color: #5a6880;
+    margin-top: 6px;
+    font-family: 'Space Mono', monospace;
+}
+
+.stat-mini {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 12px 16px;
+    text-align: center;
+}
+
+.stat-mini-label {
+    font-size: 10px;
+    color: #5a6880;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-family: 'Space Mono', monospace;
+}
+
+.stat-mini-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    color: #e8edf5;
+    margin-top: 4px;
+}
+
+/* ── SIGNAL BOX ── */
+.signal-buy {
+    background: rgba(0,229,160,0.08);
+    border: 1px solid rgba(0,229,160,0.25);
+    border-radius: 10px;
+    padding: 20px 24px;
+    text-align: center;
+}
+
+.signal-sell {
+    background: rgba(255,69,96,0.08);
+    border: 1px solid rgba(255,69,96,0.25);
+    border-radius: 10px;
+    padding: 20px 24px;
+    text-align: center;
+}
+
+.signal-text-buy {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: #00e5a0;
+}
+
+.signal-text-sell {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: #ff4560;
+}
+
+.signal-sub {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: #5a6880;
+    margin-top: 6px;
+}
+
+/* ── NEWS ITEMS ── */
+.news-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.news-row:last-child { border-bottom: none; }
+
+.news-dot-pos { width:8px;height:8px;border-radius:50%;background:#00e5a0;flex-shrink:0;margin-top:5px; }
+.news-dot-neg { width:8px;height:8px;border-radius:50%;background:#ff4560;flex-shrink:0;margin-top:5px; }
+.news-dot-neu { width:8px;height:8px;border-radius:50%;background:#5a6880;flex-shrink:0;margin-top:5px; }
+
+.news-sentiment-pos { font-family:'Space Mono',monospace;font-size:10px;color:#00e5a0;font-weight:700; }
+.news-sentiment-neg { font-family:'Space Mono',monospace;font-size:10px;color:#ff4560;font-weight:700; }
+.news-sentiment-neu { font-family:'Space Mono',monospace;font-size:10px;color:#5a6880;font-weight:700; }
+.news-headline { font-size:13px;color:#9aa5b8;line-height:1.5;margin-top:2px; }
+
+/* ── BUTTONS ── */
+.stButton > button {
+    background: #00e5a0 !important;
+    color: #080b10 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 14px !important;
+    height: 44px !important;
+    width: 100% !important;
+    transition: opacity 0.2s !important;
+}
+
+.stButton > button:hover { opacity: 0.85 !important; }
+
+/* ── INPUTS ── */
+.stTextInput > div > div > input,
+.stSelectbox > div > div {
+    background: #111820 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    color: #e8edf5 !important;
+    font-family: 'DM Sans', sans-serif !important;
+}
+
+/* ── METRICS ── */
+[data-testid="metric-container"] {
+    background: #111820;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 10px;
+    padding: 14px 16px !important;
+}
+
+[data-testid="metric-container"] label {
+    font-family: 'Space Mono', monospace !important;
+    font-size: 10px !important;
+    color: #5a6880 !important;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+[data-testid="metric-container"] [data-testid="metric-value"] {
+    font-family: 'Syne', sans-serif !important;
+    font-size: 22px !important;
+    font-weight: 800 !important;
+    color: #e8edf5 !important;
+}
+
+/* ── DIVIDER ── */
+hr { border-color: rgba(255,255,255,0.06) !important; }
+
+/* ── TOGGLE ── */
+.stToggle { color: #e8edf5 !important; }
+
+/* ── TABS ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: #111820;
+    border-radius: 10px;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid rgba(255,255,255,0.07);
+}
+
+.stTabs [data-baseweb="tab"] {
+    background: transparent;
+    border-radius: 7px;
+    color: #5a6880;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+}
+
+.stTabs [aria-selected="true"] {
+    background: #00e5a0 !important;
+    color: #080b10 !important;
+}
+
+/* ── SPINNER ── */
+.stSpinner > div { border-top-color: #00e5a0 !important; }
+
+/* ── INFO/SUCCESS/WARNING ── */
+.stAlert {
+    border-radius: 8px !important;
+    font-family: 'Space Mono', monospace !important;
+    font-size: 12px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 AI Trading System")
-
-# session state
+# ── SESSION STATE ──
 if "portfolio" not in st.session_state:
     st.session_state.portfolio = init_portfolio()
 if "paper" not in st.session_state:
     st.session_state.paper = init_paper()
-
-# top movers
-st.header("🔥 Top Movers")
-for s, c in get_top_movers():
-    st.write(s, "→", round(c, 2), "%")
-
-# ─── INPUT ROW ──────────────────────────────────────────────────────────────
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    stocks_input = st.text_input("📈 Stocks (comma separated)", "RELIANCE.NS")
-
-with col2:
-    timeframe = st.selectbox(
-        "⏱ Timeframe",
-        ["1 Day (5m)", "5 Days (15m)", "1 Month (1h)", "3 Month (1d)"]
-    )
-
-with col3:
-    # ✅ FIX: Chart type is NOW OUTSIDE the analyze button — no crash on change
-    chart_type = st.selectbox(
-        "📊 Chart Type",
-        ["Candlestick", "Line", "Bar", "OHLC", "Area"]
-    )
-
-with col4:
-    mode = st.selectbox("⚙ Mode", ["Advisor", "Paper Trading"])
-
-# ── AUTO REFRESH CONTROLS ──
-col_r1, col_r2 = st.columns([1, 3])
-with col_r1:
-    auto_refresh = st.toggle("🔄 Auto Refresh Price", value=False)
-with col_r2:
-    refresh_interval = st.select_slider(
-        "Refresh every",
-        options=[5, 10, 15, 30, 60],
-        value=15,
-        format_func=lambda x: f"{x} sec"
-    ) if auto_refresh else 15
-
-# ─── ANALYZE BUTTON ─────────────────────────────────────────────────────────
-# store analyzed stocks for auto refresh
 if "analyzed_stocks" not in st.session_state:
     st.session_state.analyzed_stocks = []
 
-analyze_clicked = st.button("🔍 Analyze")
+# ── TOP BAR ──
+st.markdown("""
+<div class="top-bar">
+    <div class="top-bar-inner">
+        <div class="logo-text">Quant<span>Edge</span></div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
+            AI Trading Intelligence · NSE/BSE
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
+# ── LIVE TICKER ──
+movers = get_top_movers()
+if movers:
+    ticker_html = '<div class="ticker-wrap"><div class="ticker-inner">'
+    for s, c in movers:
+        cls = "t-up" if c >= 0 else "t-dn"
+        arrow = "▲" if c >= 0 else "▼"
+        ticker_html += f'<span><span class="t-sym">{s}</span> &nbsp;<span class="t-price">—</span>&nbsp;<span class="{cls}">{arrow} {abs(c):.2f}%</span></span>'
+    ticker_html += '</div></div>'
+    st.markdown(ticker_html, unsafe_allow_html=True)
+
+# ── CONTROL PANEL ──
+with st.container():
+    st.markdown('<div class="card"><div class="card-title">Market Scanner</div>', unsafe_allow_html=True)
+    
+    c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
+    
+    with c1:
+        stocks_input = st.text_input("Stock Symbol", "RELIANCE.NS", 
+                                      placeholder="e.g. RELIANCE.NS, TCS.NS",
+                                      label_visibility="collapsed")
+    with c2:
+        timeframe = st.selectbox("Timeframe", 
+                                  ["1 Day (5m)", "5 Days (15m)", "1 Month (1h)", "3 Month (1d)"],
+                                  label_visibility="collapsed")
+    with c3:
+        chart_type = st.selectbox("Chart", 
+                                   ["Candlestick", "Line", "OHLC", "Bar", "Area"],
+                                   label_visibility="collapsed")
+    with c4:
+        mode = st.selectbox("Mode", ["Advisor", "Paper Trading"],
+                             label_visibility="collapsed")
+    with c5:
+        analyze_clicked = st.button("Analyze →")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Auto refresh
+col_r1, col_r2 = st.columns([1, 4])
+with col_r1:
+    auto_refresh = st.toggle("🔄 Auto Refresh", value=False)
+with col_r2:
+    refresh_interval = st.select_slider(
+        "Interval",
+        options=[5, 10, 15, 30, 60],
+        value=15,
+        format_func=lambda x: f"{x}s",
+        label_visibility="collapsed"
+    ) if auto_refresh else 15
+
+# ── ANALYZE ──
 if analyze_clicked:
     raw = [s.strip() for s in stocks_input.split(",") if s.strip()]
-    # normalize symbols
     normalized = []
     for s in raw:
-        if s.upper().endswith(".EQ"):
-            s = s.replace(".EQ", ".NS").replace(".eq", ".NS")
-        if s.upper().endswith(".BSE"):
-            s = s.replace(".BSE", ".BO")
-        s = s.strip().upper()
-        normalized.append(s)
+        if s.upper().endswith(".EQ"): s = s.replace(".EQ", ".NS")
+        if s.upper().endswith(".BSE"): s = s.replace(".BSE", ".BO")
+        normalized.append(s.strip().upper())
     st.session_state.analyzed_stocks = normalized
 
-if analyze_clicked:
-    stocks = st.session_state.analyzed_stocks
+if analyze_clicked and st.session_state.analyzed_stocks:
+    tf_map = {
+        "1 Day (5m)":   ("1d",  "5m"),
+        "5 Days (15m)": ("5d",  "15m"),
+        "1 Month (1h)": ("1mo", "1h"),
+        "3 Month (1d)": ("3mo", "1d"),
+    }
+    period, interval = tf_map[timeframe]
 
-    for stock in stocks:
-        st.subheader(f"📌 {stock}")
+    for stock in st.session_state.analyzed_stocks:
 
-        # ── live data fetch ──
-        tf_map = {
-            "1 Day (5m)":    ("1d",  "5m"),
-            "5 Days (15m)":  ("5d",  "15m"),
-            "1 Month (1h)":  ("1mo", "1h"),
-            "3 Month (1d)":  ("3mo", "1d"),
-        }
-        period, interval = tf_map[timeframe]
+        # ── STOCK HEADER ──
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:12px;margin:24px 0 16px 0;">
+            <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#e8edf5;">{stock}</div>
+            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;background:#111820;
+                        border:1px solid rgba(255,255,255,0.07);padding:4px 10px;border-radius:6px;">NSE · {timeframe}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        with st.spinner(f"Fetching live data for {stock}..."):
+        # ── FETCH DATA ──
+        with st.spinner(f"Fetching {stock}..."):
             df, source = get_live_data(stock, period=period, interval=interval)
 
         if df is None:
-            st.error(f"❌ Data load failed for {stock}")
+            st.error(f"❌ Data unavailable for {stock}")
             continue
-
-        # ✅ source badge — user ko pata chale live hai ya delayed
-        st.info("🟡 Chart data (15min delayed) — yfinance")
-
-        # ── LIVE PRICE (NSE real-time with auto refresh) ──
-        st.markdown("### 💰 Live Price")
-
-        # placeholder — auto refresh pe update hoga in-place
-        price_placeholder = st.empty()
-
-        def show_price(sym):
-            live = get_current_price(sym)
-            with price_placeholder.container():
-                if live:
-                    arrow  = "▲" if live["pChange"] >= 0 else "▼"
-                    status = "🟢 Market Open — Live" if live["market_open"] else "🔴 Market Closed — Last Close"
-                    src    = "NSE Live" if live.get("source") == "nse_live" else "yfinance"
-                    st.caption(f"{status}  ·  Source: {src}")
-                    c1, c2, c3, c4, c5 = st.columns(5)
-                    c1.metric(
-                        "Price", f"₹{live['price']:,.2f}",
-                        f"{arrow} {live['pChange']:.2f}% ({live['change']:.2f})"
-                    )
-                    c2.metric("Open",       f"₹{live['open']:,.2f}")
-                    c3.metric("Day High",   f"₹{live['high']:,.2f}")
-                    c4.metric("Day Low",    f"₹{live['low']:,.2f}")
-                    c5.metric("Prev Close", f"₹{live['close']:,.2f}")
-                    st.caption(f"Last updated: {live['time']} IST")
-                else:
-                    from live_price import is_market_open
-                    if not is_market_open():
-                        st.info("🔴 Market closed — Live price 9:15 AM se 3:30 PM IST milega")
-                    else:
-                        st.warning("⚠ NSE se data nahi aaya — internet check karo")
-
-        # first fetch
-        show_price(stock)
 
         if len(df) < 10:
-            st.warning(f"⚠ Not enough data for {stock} — try a larger timeframe (5 Days ya 1 Month)")
+            st.warning(f"⚠ Not enough data — try 5 Days or 1 Month timeframe")
             continue
 
-        # ── IST Timezone fix — UTC → IST (+5:30) ──
+        # IST fix
         try:
-            import pytz
             ist = pytz.timezone('Asia/Kolkata')
             if df.index.tzinfo is None:
                 df.index = df.index.tz_localize('UTC').tz_convert(ist)
             else:
                 df.index = df.index.tz_convert(ist)
-            # tz label hata do — plotly mein clean dikhta hai
             df.index = df.index.tz_localize(None)
-        except Exception as e:
-            print(f"[TZ] Conversion failed: {e}")
+        except Exception:
+            pass
 
-        # ma20/ma50 already added by add_indicators inside get_live_data
+        # ── TWO COLUMN LAYOUT ──
+        left_col, right_col = st.columns([2, 1])
 
-        # ─── CHART ──────────────────────────────────────────────────────────
-        from plotly.subplots import make_subplots
-
-        # ── Volume colors ──
-        has_volume = 'Volume' in df.columns and df['Volume'].sum() > 0
-        if has_volume:
-            vol_colors = [
-                '#26a69a' if float(df['Close'].iloc[i]) >= float(df['Open'].iloc[i])
-                else '#ef5350'
-                for i in range(len(df))
-            ]
-
-        # ── Subplots setup ──
-        if has_volume:
-            fig = make_subplots(
-                rows=2, cols=1,
-                shared_xaxes=True,
-                row_heights=[0.75, 0.25],
-                vertical_spacing=0.02,
-                subplot_titles=("", "Volume")
-            )
-        else:
-            fig = make_subplots(rows=1, cols=1)
-
-        # ── Price trace ──
-        if chart_type == "Candlestick":
-            fig.add_trace(go.Candlestick(
-                x=df.index,
-                open=df['Open'].squeeze(),
-                high=df['High'].squeeze(),
-                low=df['Low'].squeeze(),
-                close=df['Close'].squeeze(),
-                name="Price",
-                increasing=dict(line=dict(color='#26a69a'), fillcolor='#26a69a'),
-                decreasing=dict(line=dict(color='#ef5350'), fillcolor='#ef5350'),
-            ), row=1, col=1)
-
-        elif chart_type == "OHLC":
-            fig.add_trace(go.Ohlc(
-                x=df.index,
-                open=df['Open'].squeeze(),
-                high=df['High'].squeeze(),
-                low=df['Low'].squeeze(),
-                close=df['Close'].squeeze(),
-                name="Price",
-                increasing=dict(line=dict(color='#26a69a')),
-                decreasing=dict(line=dict(color='#ef5350')),
-            ), row=1, col=1)
-
-        elif chart_type == "Line":
-            fig.add_trace(go.Scatter(
-                x=df.index,
-                y=df['Close'].squeeze(),
-                mode='lines',
-                name="Close",
-                line=dict(color='#00bfff', width=2)
-            ), row=1, col=1)
-
-        elif chart_type == "Bar":
-            # Price bar — green/red based on close vs open
-            bar_colors = [
-                '#26a69a' if float(df['Close'].iloc[i]) >= float(df['Open'].iloc[i])
-                else '#ef5350'
-                for i in range(len(df))
-            ]
-            fig.add_trace(go.Bar(
-                x=df.index,
-                y=df['Close'].squeeze(),
-                name="Close",
-                marker_color=bar_colors,
-                opacity=0.85
-            ), row=1, col=1)
-
-        elif chart_type == "Area":
-            fig.add_trace(go.Scatter(
-                x=df.index,
-                y=df['Close'].squeeze(),
-                mode='lines',
-                name="Close",
-                fill='tozeroy',
-                line=dict(color='#26a69a', width=2),
-                fillcolor='rgba(38,166,154,0.15)'
-            ), row=1, col=1)
-
-        # ── MA overlays (sabhi chart types pe) ──
-        if 'ma20' in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index,
-                y=df['ma20'].squeeze(),
-                mode='lines',
-                line=dict(color='#ffa726', width=1.5, dash='dot'),
-                name="MA20",
-                opacity=0.8
-            ), row=1, col=1)
-
-        if 'ma50' in df.columns:
-            fig.add_trace(go.Scatter(
-                x=df.index,
-                y=df['ma50'].squeeze(),
-                mode='lines',
-                line=dict(color='#ef5350', width=1.5, dash='dot'),
-                name="MA50",
-                opacity=0.8
-            ), row=1, col=1)
-
-        # ── Volume ──
-        if has_volume:
-            fig.add_trace(go.Bar(
-                x=df.index,
-                y=df['Volume'].squeeze(),
-                name="Volume",
-                marker_color=vol_colors,
-                opacity=0.6,
-                showlegend=False
-            ), row=2, col=1)
-
-        # ── Layout ──
-        fig.update_layout(
-            template="plotly_dark",
-            height=650,
-            title=dict(
-                text=f"{stock} — {timeframe} | {chart_type}",
-                font=dict(size=16)
-            ),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(l=10, r=10, t=60, b=40),
-            xaxis_rangeslider_visible=False,
-            hovermode='x unified',
-        )
-
-        # ── X-axis: category for intraday (no weekend gaps), date for daily ──
-        if interval in ['5m', '15m']:
-            fig.update_xaxes(
-                type='category',
-                nticks=20,
-                tickangle=-45,
-                tickfont=dict(size=10)
-            )
-        else:
-            fig.update_xaxes(
-                type='date',
-                tickangle=-45,
-                tickfont=dict(size=10)
-            )
-
-        # ── Y-axis labels ──
-        fig.update_yaxes(title_text="Price (₹)", title_font=dict(size=12), row=1, col=1)
-        if has_volume:
-            fig.update_yaxes(title_text="Vol", title_font=dict(size=11), row=2, col=1)
-
-        # ── Candlestick/OHLC rangeslider off ──
-        fig.update_layout(xaxis_rangeslider_visible=False)
-
-        st.plotly_chart(fig, use_container_width=True)
-
-        # ─── ML PREDICTION ───────────────────────────────────────────────────
-        st.markdown("### 🤖 ML Prediction")
-        X, y = prepare_data(df)
-        m, acc = train_model(X, y)
-        pred = predict(m, df)
-
-        if pred is None:
-            st.warning("Prediction not available (not enough indicators)")
-        else:
-            current_price = float(df['Close'].iloc[-1])
-            signal = "BUY 📈" if pred > current_price else "SELL 📉"
-            col_a, col_b, col_c = st.columns(3)
-            col_a.metric("Signal", signal)
-            col_b.metric("Current Price", f"₹{current_price:.2f}")
-            col_c.metric("Predicted Price", f"₹{pred:.2f}")
-
-        # ─── RISK SCORE ───────────────────────────────────────────────────
-        st.write("📊 Risk:", risk_score(df))
-
-        # ─── LSTM ─────────────────────────────────────────────────────────
-        st.markdown("### 🧠 LSTM Deep Learning Prediction")
-        df_long = get_long_data(stock)
-
-        if df_long is None or len(df_long) < 60:
-            st.warning("Not enough historical data for LSTM (need 60+ days)")
-        else:
-            with st.spinner("Training LSTM..."):
-                Xl, yl, scaler = prepare_lstm_data(df_long)
-                lstm = train_lstm(Xl, yl)
-                lstm_price = predict_lstm(lstm, df_long, scaler)
-            st.success(f"LSTM Predicted Next Price: ₹{round(float(lstm_price), 2)}")
-
-        # ─── NEWS SENTIMENT ────────────────────────────────────────────────
-        st.markdown("### 📰 News Sentiment")
-        with st.spinner("Fetching latest news..."):
-            news = fetch_news(stock)
-
-        res = analyze_news(news)
-
-        for item in res:
-            icon = "🟢" if item["sentiment"] == "POSITIVE" else "🔴"
-            st.write(f"{icon} **{item['sentiment']}** ({item['score']}) — {item['news']}")
-
-        st.info(f"Overall Sentiment: {overall_sentiment(res)}")
-
-        # ─── BACKTEST ─────────────────────────────────────────────────────
-        st.markdown("### 📉 Backtest")
-        if st.button(f"Run Backtest: {stock}", key=f"bt_{stock}"):
-            if 'rsi' not in df.columns:
-                st.warning("RSI not available for backtest")
+        with left_col:
+            # ── CHART ──
+            has_volume = 'Volume' in df.columns and df['Volume'].sum() > 0
+            if has_volume:
+                vol_colors = [
+                    '#26a69a' if float(df['Close'].iloc[i]) >= float(df['Open'].iloc[i])
+                    else '#ef5350' for i in range(len(df))
+                ]
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                                    row_heights=[0.78, 0.22], vertical_spacing=0.02)
             else:
-                result = run_backtest(df)
-                st.write(result)
+                fig = make_subplots(rows=1, cols=1)
 
-        # ─── PAPER TRADING ─────────────────────────────────────────────────
-        if mode == "Paper Trading":
-            st.markdown("### 💹 Paper Trading")
-            price = float(df['Close'].iloc[-1])
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button(f"🟢 Buy {stock}", key=f"buy_{stock}"):
-                    st.session_state.paper = buy(st.session_state.paper, stock, price)
-                    st.success(f"Bought {stock} @ ₹{price:.2f}")
-            with c2:
-                if st.button(f"🔴 Sell {stock}", key=f"sell_{stock}"):
-                    st.session_state.paper = sell(st.session_state.paper, stock, price)
-                    st.success(f"Sold {stock} @ ₹{price:.2f}")
+            if chart_type == "Candlestick":
+                fig.add_trace(go.Candlestick(
+                    x=df.index, open=df['Open'].squeeze(),
+                    high=df['High'].squeeze(), low=df['Low'].squeeze(),
+                    close=df['Close'].squeeze(), name="Price",
+                    increasing=dict(line=dict(color='#26a69a'), fillcolor='#26a69a'),
+                    decreasing=dict(line=dict(color='#ef5350'), fillcolor='#ef5350'),
+                ), row=1, col=1)
+            elif chart_type == "OHLC":
+                fig.add_trace(go.Ohlc(
+                    x=df.index, open=df['Open'].squeeze(),
+                    high=df['High'].squeeze(), low=df['Low'].squeeze(),
+                    close=df['Close'].squeeze(), name="Price",
+                    increasing=dict(line=dict(color='#26a69a')),
+                    decreasing=dict(line=dict(color='#ef5350')),
+                ), row=1, col=1)
+            elif chart_type == "Line":
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['Close'].squeeze(),
+                    mode='lines', name="Close",
+                    line=dict(color='#00e5a0', width=2)
+                ), row=1, col=1)
+            elif chart_type == "Bar":
+                bar_colors = [
+                    '#26a69a' if float(df['Close'].iloc[i]) >= float(df['Open'].iloc[i])
+                    else '#ef5350' for i in range(len(df))
+                ]
+                fig.add_trace(go.Bar(
+                    x=df.index, y=df['Close'].squeeze(),
+                    name="Close", marker_color=bar_colors, opacity=0.85
+                ), row=1, col=1)
+            elif chart_type == "Area":
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['Close'].squeeze(),
+                    mode='lines', fill='tozeroy', name="Close",
+                    line=dict(color='#00e5a0', width=2),
+                    fillcolor='rgba(0,229,160,0.1)'
+                ), row=1, col=1)
 
-            st.write("💰 Balance:", f"₹{st.session_state.paper['balance']:,.2f}")
-            st.write("📦 Holdings:", st.session_state.paper["shares"])
+            if 'ma20' in df.columns:
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['ma20'].squeeze(),
+                    mode='lines', line=dict(color='#ffa726', width=1.2, dash='dot'),
+                    name="MA20", opacity=0.8
+                ), row=1, col=1)
 
-        st.divider()
+            if 'ma50' in df.columns:
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df['ma50'].squeeze(),
+                    mode='lines', line=dict(color='#ef5350', width=1.2, dash='dot'),
+                    name="MA50", opacity=0.8
+                ), row=1, col=1)
 
-# ── AUTO REFRESH (price only, outside analyze block) ──
-import time as _time
-from live_price import is_market_open as _market_open
+            if has_volume:
+                fig.add_trace(go.Bar(
+                    x=df.index, y=df['Volume'].squeeze(),
+                    name="Vol", marker_color=vol_colors,
+                    opacity=0.5, showlegend=False
+                ), row=2, col=1)
 
-if auto_refresh and st.session_state.get("analyzed_stocks"):
-    st.divider()
-    
-    # Only refresh during market hours
-    if _market_open():
-        countdown_placeholder = st.empty()
-        
-        for i in range(refresh_interval, 0, -1):
-            countdown_placeholder.caption(f"🔄 Live price refresh in {i}s... (Auto Refresh ON)")
-            _time.sleep(1)
-        
-        countdown_placeholder.empty()
-        
-        # Show updated prices for all analyzed stocks
-        st.markdown("### 💰 Auto-Refreshed Prices")
-        for sym in st.session_state.analyzed_stocks:
-            live = get_current_price(sym)
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='#0d1117',
+                plot_bgcolor='#0d1117',
+                height=500,
+                margin=dict(l=0, r=0, t=30, b=0),
+                xaxis_rangeslider_visible=False,
+                showlegend=True,
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.01,
+                    xanchor="right", x=1,
+                    font=dict(size=11, family='Space Mono'),
+                    bgcolor='rgba(0,0,0,0)'
+                ),
+                hovermode='x unified',
+                font=dict(family='DM Sans', color='#9aa5b8'),
+            )
+
+            xtype = 'category' if interval in ['5m', '15m'] else 'date'
+            fig.update_xaxes(type=xtype, nticks=20, tickangle=-45,
+                            tickfont=dict(size=9), gridcolor='rgba(255,255,255,0.04)')
+            fig.update_yaxes(gridcolor='rgba(255,255,255,0.04)',
+                            tickfont=dict(size=9))
+
+            st.plotly_chart(fig, use_container_width=True)
+
+        with right_col:
+            # ── LIVE PRICE ──
+            live = get_current_price(stock)
             if live:
                 arrow = "▲" if live["pChange"] >= 0 else "▼"
-                col1, col2, col3 = st.columns(3)
-                col1.metric(sym, f"₹{live['price']:,.2f}", 
-                           f"{arrow} {live['pChange']:.2f}%")
-                col2.metric("High", f"₹{live['high']:,.2f}")
-                col3.metric("Low",  f"₹{live['low']:,.2f}")
-        
-        # Rerun to refresh again
+                chg_class = "price-change-up" if live["pChange"] >= 0 else "price-change-dn"
+                mkt = "🟢 Live" if live["market_open"] else "🔴 Closed"
+                st.markdown(f"""
+                <div class="card">
+                    <div class="card-title">Live Price · {mkt}</div>
+                    <div class="price-main">₹{live['price']:,.2f}</div>
+                    <div class="{chg_class}">{arrow} {live['pChange']:.2f}% &nbsp;({live['change']:+.2f})</div>
+                    <div class="price-meta">Updated {live['time']} IST</div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px;">
+                        <div class="stat-mini"><div class="stat-mini-label">Open</div><div class="stat-mini-val">₹{live['open']:,.0f}</div></div>
+                        <div class="stat-mini"><div class="stat-mini-label">Prev Close</div><div class="stat-mini-val">₹{live['close']:,.0f}</div></div>
+                        <div class="stat-mini"><div class="stat-mini-label">High</div><div class="stat-mini-val" style="color:#00e5a0">₹{live['high']:,.0f}</div></div>
+                        <div class="stat-mini"><div class="stat-mini-label">Low</div><div class="stat-mini-val" style="color:#ff4560">₹{live['low']:,.0f}</div></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="card">
+                    <div class="card-title">Live Price</div>
+                    <div style="color:#5a6880;font-family:'Space Mono',monospace;font-size:12px;">
+                        {'🔴 Market closed (9:15–3:30 IST)' if not is_market_open() else '⚠ NSE unreachable'}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── AI SIGNAL ──
+            X, y = prepare_data(df)
+            m, acc = train_model(X, y)
+            pred = predict(m, df)
+
+            if pred is not None:
+                current_price = float(df['Close'].iloc[-1])
+                is_buy = pred > current_price
+                signal_class = "signal-buy" if is_buy else "signal-sell"
+                signal_text_class = "signal-text-buy" if is_buy else "signal-text-sell"
+                signal_label = "BUY 📈" if is_buy else "SELL 📉"
+                diff = pred - current_price
+                diff_pct = (diff / current_price) * 100
+
+                st.markdown(f"""
+                <div class="card">
+                    <div class="card-title">AI Signal · Random Forest</div>
+                    <div class="{signal_class}">
+                        <div class="{signal_text_class}">{signal_label}</div>
+                        <div class="signal-sub">Target: ₹{pred:,.2f} &nbsp;({diff_pct:+.2f}%)</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── RISK + RSI ──
+            rsi_val = float(df['rsi'].iloc[-1]) if 'rsi' in df.columns and not df['rsi'].isna().all() else None
+            risk = risk_score(df)
+            rsi_color = "#ff4560" if rsi_val and rsi_val > 70 else "#00e5a0" if rsi_val and rsi_val < 30 else "#ffa726"
+
+            st.markdown(f"""
+            <div class="card">
+                <div class="card-title">Risk & Momentum</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <div class="stat-mini">
+                        <div class="stat-mini-label">Risk Level</div>
+                        <div class="stat-mini-val">{risk}</div>
+                    </div>
+                    <div class="stat-mini">
+                        <div class="stat-mini-label">RSI (14)</div>
+                        <div class="stat-mini-val" style="color:{rsi_color}">{f'{rsi_val:.1f}' if rsi_val else 'N/A'}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── TABS FOR DETAILS ──
+        tab1, tab2, tab3, tab4 = st.tabs(["🧠 Deep Learning", "📰 News", "📉 Backtest", "💹 Paper Trade"])
+
+        with tab1:
+            df_long = get_long_data(stock)
+            if df_long is None or len(df_long) < 60:
+                st.warning("Need 60+ days data for deep learning prediction")
+            else:
+                with st.spinner("Training model..."):
+                    Xl, yl, scaler = prepare_lstm_data(df_long)
+                    lstm_m = train_lstm(Xl, yl)
+                    lstm_price = predict_lstm(lstm_m, df_long, scaler)
+                if lstm_price:
+                    curr = float(df['Close'].iloc[-1])
+                    is_up = lstm_price > curr
+                    diff = lstm_price - curr
+                    col_a, col_b, col_c = st.columns(3)
+                    col_a.metric("GBR Predicted Price", f"₹{lstm_price:,.2f}", f"{diff:+.2f}")
+                    col_b.metric("Current Price", f"₹{curr:,.2f}")
+                    col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
+
+        with tab2:
+            with st.spinner("Fetching news..."):
+                news = fetch_news(stock)
+            res = analyze_news(news)
+
+            news_html = '<div class="card"><div class="card-title">Latest News Sentiment</div>'
+            for item in res:
+                if item["sentiment"] == "POSITIVE":
+                    dot = "news-dot-pos"
+                    sent_cls = "news-sentiment-pos"
+                elif item["sentiment"] == "NEGATIVE":
+                    dot = "news-dot-neg"
+                    sent_cls = "news-sentiment-neg"
+                else:
+                    dot = "news-dot-neu"
+                    sent_cls = "news-sentiment-neu"
+
+                news_html += f"""
+                <div class="news-row">
+                    <div class="{dot}"></div>
+                    <div>
+                        <div class="{sent_cls}">{item['sentiment']} · {item['score']}</div>
+                        <div class="news-headline">{item['news'][:120]}{'...' if len(item['news']) > 120 else ''}</div>
+                    </div>
+                </div>"""
+
+            overall = overall_sentiment(res)
+            sentiment_color = "#00e5a0" if "Bullish" in overall else "#ff4560" if "Bearish" in overall else "#5a6880"
+            news_html += f"""
+            <div style="margin-top:16px;padding:12px 16px;background:rgba(255,255,255,0.03);
+                        border-radius:8px;border:1px solid rgba(255,255,255,0.07);">
+                <span style="font-family:'Space Mono',monospace;font-size:12px;color:{sentiment_color};font-weight:700;">
+                    Overall: {overall}
+                </span>
+            </div></div>"""
+            st.markdown(news_html, unsafe_allow_html=True)
+
+        with tab3:
+            if 'rsi' not in df.columns:
+                st.warning("RSI data needed for backtest")
+            else:
+                if st.button(f"▶ Run RSI Backtest", key=f"bt_{stock}"):
+                    result = run_backtest(df)
+                    col_x, col_y = st.columns(2)
+                    col_x.metric("Final Value", f"₹{result['Final']:,.2f}")
+                    profit = result['Profit']
+                    col_y.metric("Profit/Loss", f"₹{profit:,.2f}", 
+                                f"{'▲' if profit >= 0 else '▼'} {abs(profit/100):.1f}%")
+
+        with tab4:
+            if mode == "Paper Trading":
+                price = float(df['Close'].iloc[-1])
+                bal = st.session_state.paper["balance"]
+                holdings = st.session_state.paper["shares"]
+
+                st.markdown(f"""
+                <div style="display:flex;gap:16px;margin-bottom:16px;">
+                    <div class="stat-mini" style="flex:1">
+                        <div class="stat-mini-label">Balance</div>
+                        <div class="stat-mini-val" style="color:#00e5a0">₹{bal:,.2f}</div>
+                    </div>
+                    <div class="stat-mini" style="flex:1">
+                        <div class="stat-mini-label">{stock} Holdings</div>
+                        <div class="stat-mini-val">{holdings.get(stock, 0)} shares</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button(f"🟢 BUY @ ₹{price:,.2f}", key=f"buy_{stock}"):
+                        st.session_state.paper = buy(st.session_state.paper, stock, price)
+                        st.success(f"✅ Bought {stock} @ ₹{price:,.2f}")
+                        st.rerun()
+                with c2:
+                    if st.button(f"🔴 SELL @ ₹{price:,.2f}", key=f"sell_{stock}"):
+                        st.session_state.paper = sell(st.session_state.paper, stock, price)
+                        st.success(f"✅ Sold {stock} @ ₹{price:,.2f}")
+                        st.rerun()
+            else:
+                st.info("Switch mode to 'Paper Trading' to practice trades")
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+# ── AUTO REFRESH ──
+if auto_refresh and st.session_state.get("analyzed_stocks"):
+    if is_market_open():
+        countdown_placeholder = st.empty()
+        for i in range(refresh_interval, 0, -1):
+            countdown_placeholder.markdown(f"""
+            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;text-align:center;padding:8px;">
+                🔄 Auto refresh in {i}s
+            </div>""", unsafe_allow_html=True)
+            _time.sleep(1)
+        countdown_placeholder.empty()
         st.rerun()
     else:
-        st.info("🔴 Market closed — Auto refresh sirf 9:15 AM - 3:30 PM kaam karta hai")
+        st.markdown("""
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;text-align:center;padding:8px;">
+            🔴 Auto refresh paused — Market closed (9:15 AM – 3:30 PM IST)
+        </div>""", unsafe_allow_html=True)
