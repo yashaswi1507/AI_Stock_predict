@@ -1,7 +1,7 @@
 import requests
 from textblob import TextBlob
 
-NEWSAPI_KEY = "your_api_key_here"  # 👈 apna key yahan daalo
+NEWSAPI_KEY = "c81e872af5f1407ca516f53761eacb2b"  # 👈 apna key yahan daalo
 
 
 def fetch_news(stock):
