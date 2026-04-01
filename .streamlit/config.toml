@@ -1,0 +1,7 @@
+[server]
+pythonVersion = "3.11"
+```
+
+Ya directly GitHub pe **`runtime.txt`** file banao project root mein:
+```
+python-3.11.9
