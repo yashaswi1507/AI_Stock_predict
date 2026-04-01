@@ -5,9 +5,7 @@ numpy
 scikit-learn
 ta
 plotly
-tensorflow
 transformers
 requests
-openchart
-nsetools
-ngrok
+pytz
+
