@@ -160,128 +160,174 @@ if analyze_clicked:
             st.warning(f"⚠ Not enough data for {stock} — try a larger timeframe (5 Days ya 1 Month)")
             continue
 
+        # ── IST Timezone fix — UTC → IST (+5:30) ──
+        try:
+            import pytz
+            ist = pytz.timezone('Asia/Kolkata')
+            if df.index.tzinfo is None:
+                df.index = df.index.tz_localize('UTC').tz_convert(ist)
+            else:
+                df.index = df.index.tz_convert(ist)
+            # tz label hata do — plotly mein clean dikhta hai
+            df.index = df.index.tz_localize(None)
+        except Exception as e:
+            print(f"[TZ] Conversion failed: {e}")
+
         # ma20/ma50 already added by add_indicators inside get_live_data
 
         # ─── CHART ──────────────────────────────────────────────────────────
         from plotly.subplots import make_subplots
 
-        # Volume ke liye color (green = up day, red = down day)
-        if 'Volume' in df.columns:
+        # ── Volume colors ──
+        has_volume = 'Volume' in df.columns and df['Volume'].sum() > 0
+        if has_volume:
             vol_colors = [
-                '#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i]
+                '#26a69a' if float(df['Close'].iloc[i]) >= float(df['Open'].iloc[i])
                 else '#ef5350'
                 for i in range(len(df))
             ]
-            has_volume = True
-        else:
-            has_volume = False
 
-        # 2 rows — row1: price, row2: volume (agar available ho)
+        # ── Subplots setup ──
         if has_volume:
             fig = make_subplots(
                 rows=2, cols=1,
                 shared_xaxes=True,
                 row_heights=[0.75, 0.25],
-                vertical_spacing=0.02
+                vertical_spacing=0.02,
+                subplot_titles=("", "Volume")
             )
         else:
             fig = make_subplots(rows=1, cols=1)
 
-        # ── Price chart (row 1) ──
+        # ── Price trace ──
         if chart_type == "Candlestick":
             fig.add_trace(go.Candlestick(
                 x=df.index,
-                open=df['Open'],
-                high=df['High'],
-                low=df['Low'],
-                close=df['Close'],
+                open=df['Open'].squeeze(),
+                high=df['High'].squeeze(),
+                low=df['Low'].squeeze(),
+                close=df['Close'].squeeze(),
                 name="Price",
-                increasing_line_color='#26a69a',
-                decreasing_line_color='#ef5350'
+                increasing=dict(line=dict(color='#26a69a'), fillcolor='#26a69a'),
+                decreasing=dict(line=dict(color='#ef5350'), fillcolor='#ef5350'),
             ), row=1, col=1)
 
         elif chart_type == "OHLC":
             fig.add_trace(go.Ohlc(
                 x=df.index,
-                open=df['Open'],
-                high=df['High'],
-                low=df['Low'],
-                close=df['Close'],
-                name="Price"
+                open=df['Open'].squeeze(),
+                high=df['High'].squeeze(),
+                low=df['Low'].squeeze(),
+                close=df['Close'].squeeze(),
+                name="Price",
+                increasing=dict(line=dict(color='#26a69a')),
+                decreasing=dict(line=dict(color='#ef5350')),
             ), row=1, col=1)
 
         elif chart_type == "Line":
             fig.add_trace(go.Scatter(
                 x=df.index,
-                y=df['Close'],
+                y=df['Close'].squeeze(),
                 mode='lines',
                 name="Close",
                 line=dict(color='#00bfff', width=2)
             ), row=1, col=1)
 
         elif chart_type == "Bar":
+            # Price bar — green/red based on close vs open
+            bar_colors = [
+                '#26a69a' if float(df['Close'].iloc[i]) >= float(df['Open'].iloc[i])
+                else '#ef5350'
+                for i in range(len(df))
+            ]
             fig.add_trace(go.Bar(
                 x=df.index,
-                y=df['Close'],
+                y=df['Close'].squeeze(),
                 name="Close",
-                marker_color='#7e57c2'
+                marker_color=bar_colors,
+                opacity=0.85
             ), row=1, col=1)
 
         elif chart_type == "Area":
             fig.add_trace(go.Scatter(
                 x=df.index,
-                y=df['Close'],
+                y=df['Close'].squeeze(),
                 mode='lines',
                 name="Close",
                 fill='tozeroy',
                 line=dict(color='#26a69a', width=2),
-                fillcolor='rgba(38,166,154,0.2)'
+                fillcolor='rgba(38,166,154,0.15)'
             ), row=1, col=1)
 
-        # ── Moving averages overlay ──
+        # ── MA overlays (sabhi chart types pe) ──
         if 'ma20' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df.index, y=df['ma20'],
-                line=dict(color='#ffa726', width=1.5),
-                name="MA20"
+                x=df.index,
+                y=df['ma20'].squeeze(),
+                mode='lines',
+                line=dict(color='#ffa726', width=1.5, dash='dot'),
+                name="MA20",
+                opacity=0.8
             ), row=1, col=1)
 
         if 'ma50' in df.columns:
             fig.add_trace(go.Scatter(
-                x=df.index, y=df['ma50'],
-                line=dict(color='#ef5350', width=1.5),
-                name="MA50"
+                x=df.index,
+                y=df['ma50'].squeeze(),
+                mode='lines',
+                line=dict(color='#ef5350', width=1.5, dash='dot'),
+                name="MA50",
+                opacity=0.8
             ), row=1, col=1)
 
-        # ── Volume chart (row 2) ──
+        # ── Volume ──
         if has_volume:
             fig.add_trace(go.Bar(
                 x=df.index,
-                y=df['Volume'],
+                y=df['Volume'].squeeze(),
                 name="Volume",
                 marker_color=vol_colors,
-                opacity=0.7
+                opacity=0.6,
+                showlegend=False
             ), row=2, col=1)
 
         # ── Layout ──
-        xaxis_type = 'category' if interval in ['5m', '15m', '1h'] else 'date'
-
         fig.update_layout(
             template="plotly_dark",
             height=650,
-            title=f"{stock} — {timeframe} ({chart_type})",
-            xaxis_rangeslider_visible=False,
+            title=dict(
+                text=f"{stock} — {timeframe} | {chart_type}",
+                font=dict(size=16)
+            ),
             showlegend=True,
-            margin=dict(l=10, r=10, t=50, b=60)
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(l=10, r=10, t=60, b=40),
+            xaxis_rangeslider_visible=False,
+            hovermode='x unified',
         )
 
-        # shared x-axis settings
-        fig.update_xaxes(type=xaxis_type, nticks=30, tickangle=-45)
+        # ── X-axis: category for intraday (no weekend gaps), date for daily ──
+        if interval in ['5m', '15m']:
+            fig.update_xaxes(
+                type='category',
+                nticks=20,
+                tickangle=-45,
+                tickfont=dict(size=10)
+            )
+        else:
+            fig.update_xaxes(
+                type='date',
+                tickangle=-45,
+                tickfont=dict(size=10)
+            )
 
-        # y-axis labels
-        fig.update_yaxes(title_text="Price (₹)", row=1, col=1)
+        # ── Y-axis labels ──
+        fig.update_yaxes(title_text="Price (₹)", title_font=dict(size=12), row=1, col=1)
         if has_volume:
-            fig.update_yaxes(title_text="Volume", row=2, col=1)
+            fig.update_yaxes(title_text="Vol", title_font=dict(size=11), row=2, col=1)
+
+        # ── Candlestick/OHLC rangeslider off ──
+        fig.update_layout(xaxis_rangeslider_visible=False)
 
         st.plotly_chart(fig, use_container_width=True)
 
