@@ -463,7 +463,7 @@ if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.sessio
             st.error(f"❌ Data unavailable for {stock}")
             continue
 
-        if len(df) < 10:
+        if len(df) < 20:
             st.warning(f"⚠ Not enough data — try 5 Days or 1 Month timeframe")
             continue
 
@@ -672,34 +672,45 @@ if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.sessio
         with tab1:
             # Use cached LSTM result on refresh
             if is_refresh and 'lstm_price' in cache:
-                lstm_price = cache['lstm_price']
-                curr = float(df['Close'].iloc[-1])
-                is_up = lstm_price > curr
-                diff = lstm_price - curr
+                lstm_price  = cache['lstm_price']
+                curr        = cache.get('lstm_curr', lstm_price)
+                is_up       = lstm_price > curr
+                diff        = lstm_price - curr
+                diff_pct    = (diff / curr * 100) if curr else 0
                 col_a, col_b, col_c = st.columns(3)
-                col_a.metric("GBR Predicted Price", f"₹{lstm_price:,.2f}", f"{diff:+.2f}")
-                col_b.metric("Current Price", f"₹{curr:,.2f}")
+                col_a.metric("Last Close (Daily)", f"₹{curr:,.2f}")
+                col_b.metric("Predicted Next Close", f"₹{lstm_price:,.2f}", f"{diff:+.2f} ({diff_pct:+.2f}%)")
                 col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
-                st.caption("📦 Cached — Re-analyze to retrain")
+                st.caption("📦 Cached — Re-analyze to retrain model")
             else:
                 df_long = get_long_data(stock)
                 if df_long is None or len(df_long) < 60:
                     st.warning("Need 60+ days data for deep learning prediction")
                 else:
-                    with st.spinner("Training model..."):
+                    with st.spinner("Training Deep Learning model on 6 months data..."):
                         Xl, yl, scaler = prepare_lstm_data(df_long)
                         lstm_m = train_lstm(Xl, yl)
                         lstm_price = predict_lstm(lstm_m, df_long, scaler)
+
                     if lstm_price:
-                        curr = float(df['Close'].iloc[-1])
-                        is_up = lstm_price > curr
-                        diff = lstm_price - curr
+                        # ✅ FIX: curr = df_long ka last close (daily data)
+                        # lstm predicts NEXT DAY close based on daily history
+                        curr     = float(df_long['Close'].squeeze().iloc[-1])
+                        is_up    = lstm_price > curr
+                        diff     = lstm_price - curr
+                        diff_pct = (diff / curr * 100) if curr else 0
+
                         col_a, col_b, col_c = st.columns(3)
-                        col_a.metric("GBR Predicted Price", f"₹{lstm_price:,.2f}", f"{diff:+.2f}")
-                        col_b.metric("Current Price", f"₹{curr:,.2f}")
+                        col_a.metric("Last Close (Daily)", f"₹{curr:,.2f}")
+                        col_b.metric("Predicted Next Close", f"₹{lstm_price:,.2f}",
+                                     f"{diff:+.2f} ({diff_pct:+.2f}%)")
                         col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
+
+                        st.caption("ℹ️ Prediction = next trading day ka expected closing price (6 months daily data pe trained)")
+
                         if stock in st.session_state.analysis_cache:
                             st.session_state.analysis_cache[stock]['lstm_price'] = lstm_price
+                            st.session_state.analysis_cache[stock]['lstm_curr']  = curr
 
         with tab2:
             # Use cached news on refresh
