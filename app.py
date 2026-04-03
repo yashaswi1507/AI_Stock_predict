@@ -614,53 +614,151 @@ if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.sessio
                 </div>
                 """, unsafe_allow_html=True)
 
-            # ── AI SIGNAL — use cache on refresh ──
-            if is_refresh and 'pred' in cache:
-                pred = cache['pred']
-                current_price = cache.get('current_price', float(df['Close'].iloc[-1]))
-            else:
-                X, y = prepare_data(df)
-                m, acc = train_model(X, y)
-                pred = predict(m, df)
-                current_price = float(df['Close'].iloc[-1])
-                if stock in st.session_state.analysis_cache:
-                    st.session_state.analysis_cache[stock]['pred'] = pred
-                    st.session_state.analysis_cache[stock]['current_price'] = current_price
+            # ── RSI CARD with explanation ──
+            rsi_val = float(df['rsi'].iloc[-1]) if 'rsi' in df.columns and not df['rsi'].isna().all() else None
+            risk    = risk_score(df)
 
-            if pred is not None:
-                is_buy = pred > current_price
-                signal_class = "signal-buy" if is_buy else "signal-sell"
-                signal_text_class = "signal-text-buy" if is_buy else "signal-text-sell"
-                signal_label = "BUY 📈" if is_buy else "SELL 📉"
-                diff = pred - current_price
-                diff_pct = (diff / current_price) * 100
+            if rsi_val:
+                rsi_color = "#ff4560" if rsi_val > 70 else "#00e5a0" if rsi_val < 30 else "#ffa726"
+                if rsi_val > 70:
+                    rsi_zone   = "Overbought 🔴"
+                    rsi_mean   = "Stock bahut upar aa gaya hai — correction ya pullback ho sakta hai"
+                    rsi_action = "Caution: sell ya wait karo"
+                elif rsi_val < 30:
+                    rsi_zone   = "Oversold 🟢"
+                    rsi_mean   = "Stock bahut neeche aa gaya hai — bounce ya recovery possible"
+                    rsi_action = "Opportunity: buy consider kar sakte ho"
+                elif rsi_val > 55:
+                    rsi_zone   = "Bullish Zone 🟡"
+                    rsi_mean   = "Momentum positive hai — buyers control mein hain"
+                    rsi_action = "Trend follow karo"
+                elif rsi_val < 45:
+                    rsi_zone   = "Bearish Zone 🟡"
+                    rsi_mean   = "Momentum negative hai — sellers control mein hain"
+                    rsi_action = "Wait karo ya short"
+                else:
+                    rsi_zone   = "Neutral ⚪"
+                    rsi_mean   = "Koi clear signal nahi — market indecisive hai"
+                    rsi_action = "Dusre indicators dekho"
 
                 st.markdown(f"""
                 <div class="card">
-                    <div class="card-title">AI Signal · Random Forest</div>
-                    <div class="{signal_class}">
-                        <div class="{signal_text_class}">{signal_label}</div>
-                        <div class="signal-sub">Target: ₹{pred:,.2f} &nbsp;({diff_pct:+.2f}%)</div>
+                    <div class="card-title">RSI (14) — Relative Strength Index</div>
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                        <div style="font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:{rsi_color}">{rsi_val:.1f}</div>
+                        <div>
+                            <div style="font-size:13px;font-weight:600;color:{rsi_color}">{rsi_zone}</div>
+                            <div style="font-size:11px;color:#5a6880;margin-top:2px">{rsi_action}</div>
+                        </div>
+                    </div>
+                    <div style="background:#111820;border-radius:6px;height:8px;margin-bottom:10px;position:relative;">
+                        <div style="position:absolute;left:0;top:0;height:100%;width:30%;background:#00e5a040;border-radius:6px 0 0 6px;"></div>
+                        <div style="position:absolute;right:0;top:0;height:100%;width:30%;background:#ff456040;border-radius:0 6px 6px 0;"></div>
+                        <div style="position:absolute;top:-4px;left:calc({min(rsi_val,99):.0f}% - 6px);width:12px;height:16px;background:{rsi_color};border-radius:3px;"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-family:'Space Mono',monospace;font-size:9px;color:#5a6880;margin-bottom:10px;">
+                        <span>0 — Oversold</span><span>50 — Neutral</span><span>100 — Overbought</span>
+                    </div>
+                    <div style="font-size:12px;color:#9aa5b8;border-top:1px solid rgba(255,255,255,0.05);padding-top:10px;">
+                        💡 {rsi_mean}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
-            # ── RISK + RSI ──
-            rsi_val = float(df['rsi'].iloc[-1]) if 'rsi' in df.columns and not df['rsi'].isna().all() else None
-            risk = risk_score(df)
-            rsi_color = "#ff4560" if rsi_val and rsi_val > 70 else "#00e5a0" if rsi_val and rsi_val < 30 else "#ffa726"
+            # ── AI SIGNAL — use cache on refresh ──
+            if is_refresh and 'pred' in cache:
+                pred          = cache['pred']
+                current_price = cache.get('current_price', float(df['Close'].iloc[-1]))
+            else:
+                X, y = prepare_data(df)
+                m, acc = train_model(X, y)
+                pred          = predict(m, df)
+                current_price = float(df['Close'].iloc[-1])
+                if stock in st.session_state.analysis_cache:
+                    st.session_state.analysis_cache[stock]['pred']          = pred
+                    st.session_state.analysis_cache[stock]['current_price'] = current_price
 
+            if pred is not None:
+                is_buy    = pred > current_price
+                diff      = pred - current_price
+                diff_pct  = (diff / current_price) * 100
+                signal_label = "BUY 📈" if is_buy else "SELL 📉"
+                sig_color = "#00e5a0" if is_buy else "#ff4560"
+                sig_bg    = "rgba(0,229,160,0.08)" if is_buy else "rgba(255,69,96,0.08)"
+                sig_bdr   = "rgba(0,229,160,0.25)" if is_buy else "rgba(255,69,96,0.25)"
+
+                # Price range: ±1 ATR
+                try:
+                    import ta as _ta
+                    atr = _ta.volatility.AverageTrueRange(
+                        df['High'].squeeze(), df['Low'].squeeze(),
+                        df['Close'].squeeze(), window=14
+                    ).average_true_range().iloc[-1]
+                    low_target  = round(pred - atr, 2)
+                    high_target = round(pred + atr, 2)
+                    has_range   = True
+                except Exception:
+                    has_range = False
+
+                # Why signal — logic explain
+                reasons = []
+                if rsi_val:
+                    if rsi_val < 35:  reasons.append(f"RSI {rsi_val:.0f} — oversold, bounce likely")
+                    elif rsi_val > 65: reasons.append(f"RSI {rsi_val:.0f} — overbought, pullback risk")
+                    else:              reasons.append(f"RSI {rsi_val:.0f} — {'bullish' if rsi_val>50 else 'bearish'} momentum")
+                if 'ma20' in df.columns and 'ma50' in df.columns:
+                    ma20 = float(df['ma20'].iloc[-1])
+                    ma50 = float(df['ma50'].iloc[-1])
+                    if ma20 > ma50: reasons.append("MA20 > MA50 — uptrend confirmed")
+                    else:           reasons.append("MA20 < MA50 — downtrend in play")
+                if diff_pct > 0:    reasons.append(f"Model projects +{diff_pct:.2f}% upside")
+                else:               reasons.append(f"Model projects {diff_pct:.2f}% downside")
+
+                range_html = f"""
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+                        <div class="stat-mini"><div class="stat-mini-label">Conservative Target</div>
+                        <div class="stat-mini-val" style="color:#00e5a0">₹{low_target:,.2f}</div></div>
+                        <div class="stat-mini"><div class="stat-mini-label">Optimistic Target</div>
+                        <div class="stat-mini-val" style="color:#ffa726">₹{high_target:,.2f}</div></div>
+                    </div>""" if has_range else ""
+
+                reasons_html = "".join([
+                    f'<div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;">'
+                    f'<span style="color:{sig_color};font-size:10px;margin-top:2px;">▸</span>'
+                    f'<span style="font-size:12px;color:#9aa5b8;">{r}</span></div>'
+                    for r in reasons
+                ])
+
+                st.markdown(f"""
+                <div class="card">
+                    <div class="card-title">AI Signal · Ensemble Model</div>
+                    <div style="background:{sig_bg};border:1px solid {sig_bdr};border-radius:10px;padding:16px 20px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                            <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:{sig_color}">{signal_label}</div>
+                            <div style="text-align:right;">
+                                <div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:{sig_color}">₹{pred:,.2f}</div>
+                                <div style="font-family:'Space Mono',monospace;font-size:12px;color:#5a6880">{diff_pct:+.2f}%</div>
+                            </div>
+                        </div>
+                        {range_html}
+                    </div>
+                    <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;">
+                        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#5a6880;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Why this signal?</div>
+                        {reasons_html}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # ── RISK CARD ──
             st.markdown(f"""
             <div class="card">
-                <div class="card-title">Risk & Momentum</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                    <div class="stat-mini">
-                        <div class="stat-mini-label">Risk Level</div>
-                        <div class="stat-mini-val">{risk}</div>
-                    </div>
-                    <div class="stat-mini">
-                        <div class="stat-mini-label">RSI (14)</div>
-                        <div class="stat-mini-val" style="color:{rsi_color}">{f'{rsi_val:.1f}' if rsi_val else 'N/A'}</div>
+                <div class="card-title">Risk Level</div>
+                <div class="stat-mini">
+                    <div class="stat-mini-val" style="font-size:18px;">{risk}</div>
+                    <div style="font-size:11px;color:#5a6880;margin-top:4px;">
+                        {'Volatility kam hai — price stable rahega' if 'Low' in risk else
+                         'Moderate volatility — normal market conditions' if 'Medium' in risk else
+                         'High volatility — bade moves possible, careful raho'}
                     </div>
                 </div>
             </div>
@@ -670,44 +768,104 @@ if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.sessio
         tab1, tab2, tab3, tab4 = st.tabs(["🧠 Deep Learning", "📰 News", "📉 Backtest", "💹 Paper Trade"])
 
         with tab1:
+            def show_dl_result(lstm_price, curr, cached=False):
+                """Deep Learning result display with full explanation"""
+                import ta as _ta
+
+                is_up    = lstm_price > curr
+                diff     = lstm_price - curr
+                diff_pct = (diff / curr * 100) if curr else 0
+                sig_color = "#00e5a0" if is_up else "#ff4560"
+                direction = "📈 Bullish" if is_up else "📉 Bearish"
+
+                # Price range using 3% band
+                band = curr * 0.03
+                conservative = round(lstm_price - band/2, 2)
+                optimistic   = round(lstm_price + band/2, 2)
+
+                # Overall outlook summary
+                if diff_pct > 2:
+                    outlook = "Strong Bullish 🟢"
+                    summary = f"Model strong upside project kar raha hai. Price ₹{conservative:,.0f} se ₹{optimistic:,.0f} tak ja sakta hai."
+                elif diff_pct > 0.5:
+                    outlook = "Mildly Bullish 🟡"
+                    summary = f"Thodi upward movement expected. ₹{conservative:,.0f}–₹{optimistic:,.0f} range likely."
+                elif diff_pct > -0.5:
+                    outlook = "Sideways ⚪"
+                    summary = f"Market flat rahega. ₹{conservative:,.0f}–₹{optimistic:,.0f} ke beech consolidation."
+                elif diff_pct > -2:
+                    outlook = "Mildly Bearish 🟡"
+                    summary = f"Thodi downward pressure. ₹{conservative:,.0f}–₹{optimistic:,.0f} range mein girawat ho sakti hai."
+                else:
+                    outlook = "Strong Bearish 🔴"
+                    summary = f"Model significant downside project kar raha hai. ₹{conservative:,.0f} tak gir sakta hai."
+
+                st.markdown(f"""
+                <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);
+                            border-radius:12px;padding:20px 24px;margin-bottom:16px;">
+                    <div style="font-family:'Space Mono',monospace;font-size:10px;color:#5a6880;
+                                text-transform:uppercase;letter-spacing:2px;margin-bottom:16px;">
+                        Deep Learning Prediction · 6 Month Daily Data
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
+                        <div style="text-align:center;">
+                            <div style="font-size:11px;color:#5a6880;margin-bottom:4px;">Current Price</div>
+                            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;">₹{curr:,.2f}</div>
+                        </div>
+                        <div style="text-align:center;border-left:1px solid rgba(255,255,255,0.07);
+                                    border-right:1px solid rgba(255,255,255,0.07);">
+                            <div style="font-size:11px;color:#5a6880;margin-bottom:4px;">Price Target</div>
+                            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:{sig_color}">₹{lstm_price:,.2f}</div>
+                            <div style="font-family:'Space Mono',monospace;font-size:11px;color:{sig_color}">{diff_pct:+.2f}%</div>
+                        </div>
+                        <div style="text-align:center;">
+                            <div style="font-size:11px;color:#5a6880;margin-bottom:4px;">Direction</div>
+                            <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:{sig_color}">{direction}</div>
+                        </div>
+                    </div>
+                    <div style="background:#111820;border-radius:8px;padding:14px 18px;margin-bottom:14px;">
+                        <div style="font-size:12px;font-weight:600;color:{sig_color};margin-bottom:6px;">{outlook}</div>
+                        <div style="font-size:13px;color:#9aa5b8;line-height:1.6;">{summary}</div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
+                        <div class="stat-mini">
+                            <div class="stat-mini-label">Conservative Target</div>
+                            <div class="stat-mini-val" style="color:#00e5a0">₹{conservative:,.2f}</div>
+                        </div>
+                        <div class="stat-mini">
+                            <div class="stat-mini-label">Optimistic Target</div>
+                            <div class="stat-mini-val" style="color:#ffa726">₹{optimistic:,.2f}</div>
+                        </div>
+                    </div>
+                    <div style="border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;">
+                        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#5a6880;
+                                    text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">How this works</div>
+                        <div style="font-size:12px;color:#5a6880;line-height:1.7;">
+                            Model ne last 6 months ki daily closing prices, RSI, Bollinger Bands, aur MACD dekhe hain.
+                            In patterns ke basis pe agle trading session ka price range predict kiya gaya hai.
+                            Conservative = safe estimate · Optimistic = best case scenario.
+                        </div>
+                    </div>
+                    {'<div style="margin-top:10px;font-family:Space Mono,monospace;font-size:10px;color:#5a6880;">📦 Cached result — Re-Analyze button dabao to retrain</div>' if cached else ''}
+                </div>
+                """, unsafe_allow_html=True)
+
             # Use cached LSTM result on refresh
             if is_refresh and 'lstm_price' in cache:
-                lstm_price  = cache['lstm_price']
-                curr        = cache.get('lstm_curr', lstm_price)
-                is_up       = lstm_price > curr
-                diff        = lstm_price - curr
-                diff_pct    = (diff / curr * 100) if curr else 0
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("Last Close (Daily)", f"₹{curr:,.2f}")
-                col_b.metric("Predicted Next Close", f"₹{lstm_price:,.2f}", f"{diff:+.2f} ({diff_pct:+.2f}%)")
-                col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
-                st.caption("📦 Cached — Re-analyze to retrain model")
+                show_dl_result(cache['lstm_price'], cache.get('lstm_curr', cache['lstm_price']), cached=True)
             else:
                 df_long = get_long_data(stock)
                 if df_long is None or len(df_long) < 60:
                     st.warning("Need 60+ days data for deep learning prediction")
                 else:
-                    with st.spinner("Training Deep Learning model on 6 months data..."):
+                    with st.spinner("Deep Learning model training on 6 months data..."):
                         Xl, yl, scaler = prepare_lstm_data(df_long)
-                        lstm_m = train_lstm(Xl, yl)
-                        lstm_price = predict_lstm(lstm_m, df_long, scaler)
+                        lstm_m         = train_lstm(Xl, yl)
+                        lstm_price     = predict_lstm(lstm_m, df_long, scaler)
 
                     if lstm_price:
-                        # ✅ FIX: curr = df_long ka last close (daily data)
-                        # lstm predicts NEXT DAY close based on daily history
-                        curr     = float(df_long['Close'].squeeze().iloc[-1])
-                        is_up    = lstm_price > curr
-                        diff     = lstm_price - curr
-                        diff_pct = (diff / curr * 100) if curr else 0
-
-                        col_a, col_b, col_c = st.columns(3)
-                        col_a.metric("Last Close (Daily)", f"₹{curr:,.2f}")
-                        col_b.metric("Predicted Next Close", f"₹{lstm_price:,.2f}",
-                                     f"{diff:+.2f} ({diff_pct:+.2f}%)")
-                        col_c.metric("Direction", "📈 Up" if is_up else "📉 Down")
-
-                        st.caption("ℹ️ Prediction = next trading day ka expected closing price (6 months daily data pe trained)")
-
+                        curr = float(df_long['Close'].squeeze().iloc[-1])
+                        show_dl_result(lstm_price, curr)
                         if stock in st.session_state.analysis_cache:
                             st.session_state.analysis_cache[stock]['lstm_price'] = lstm_price
                             st.session_state.analysis_cache[stock]['lstm_curr']  = curr
@@ -756,16 +914,88 @@ if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.sessio
             st.markdown(news_html, unsafe_allow_html=True)
 
         with tab3:
+            # RSI kya hota hai — explanation
+            st.markdown("""
+            <div style="background:#111820;border:1px solid rgba(255,255,255,0.07);
+                        border-radius:10px;padding:16px 20px;margin-bottom:16px;">
+                <div style="font-family:'Space Mono',monospace;font-size:10px;color:#00e5a0;
+                            text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">
+                    RSI kya hota hai?
+                </div>
+                <div style="font-size:13px;color:#9aa5b8;line-height:1.8;">
+                    <b style="color:#e8edf5;">RSI (Relative Strength Index)</b> ek momentum indicator hai jo 0–100 ke beech hota hai.<br><br>
+                    <span style="color:#00e5a0;">● RSI &lt; 30</span> — Stock <b style="color:#e8edf5;">Oversold</b> hai → yaani bahut zyada gir gaya hai → 
+                    <b style="color:#00e5a0;">Buy ka mauka ho sakta hai</b><br>
+                    <span style="color:#ffa726;">● RSI 30–70</span> — <b style="color:#e8edf5;">Normal zone</b> → koi extreme signal nahi<br>
+                    <span style="color:#ff4560;">● RSI &gt; 70</span> — Stock <b style="color:#e8edf5;">Overbought</b> hai → bahut upar aa gaya hai → 
+                    <b style="color:#ff4560;">Sell/Caution</b><br><br>
+                    <b style="color:#e8edf5;">RSI Backtest kya karta hai?</b><br>
+                    Yeh strategy test karta hai: <i>Agar RSI &lt; 30 pe buy karo aur RSI &gt; 70 pe sell karo</i> toh 
+                    pichle data mein kitna profit/loss hota. ₹10,000 se shuru karke dekhte hain.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
             if 'rsi' not in df.columns:
-                st.warning("RSI data needed for backtest")
+                st.warning("RSI data needed for backtest — try 5 Days or 1 Month timeframe")
             else:
-                if st.button(f"▶ Run RSI Backtest", key=f"bt_{stock}"):
-                    result = run_backtest(df)
-                    col_x, col_y = st.columns(2)
-                    col_x.metric("Final Value", f"₹{result['Final']:,.2f}")
-                    profit = result['Profit']
-                    col_y.metric("Profit/Loss", f"₹{profit:,.2f}", 
-                                f"{'▲' if profit >= 0 else '▼'} {abs(profit/100):.1f}%")
+                # Init backtest cache
+                bt_key = f"bt_result_{stock}"
+                if bt_key not in st.session_state:
+                    st.session_state[bt_key] = None
+
+                if st.button(f"▶ Run RSI Backtest on {stock}", key=f"bt_{stock}"):
+                    with st.spinner("Running backtest..."):
+                        result = run_backtest(df)
+                    st.session_state[bt_key] = result
+
+                # Show result — from session state (survives rerun)
+                result = st.session_state.get(bt_key)
+                if result:
+                    profit   = result['Profit']
+                    final    = result['Final']
+                    profit_pct = (profit / 10000) * 100
+                    is_profit  = profit >= 0
+                    p_color    = "#00e5a0" if is_profit else "#ff4560"
+                    p_icon     = "▲" if is_profit else "▼"
+
+                    st.markdown(f"""
+                    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);
+                                border-radius:12px;padding:20px 24px;margin-top:8px;">
+                        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#5a6880;
+                                    text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px;">
+                            Backtest Result · RSI Strategy · Starting Capital ₹10,000
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
+                            <div class="stat-mini">
+                                <div class="stat-mini-label">Starting Amount</div>
+                                <div class="stat-mini-val">₹10,000</div>
+                            </div>
+                            <div class="stat-mini">
+                                <div class="stat-mini-label">Final Amount</div>
+                                <div class="stat-mini-val">₹{final:,.2f}</div>
+                            </div>
+                            <div class="stat-mini">
+                                <div class="stat-mini-label">Profit / Loss</div>
+                                <div class="stat-mini-val" style="color:{p_color}">
+                                    {p_icon} ₹{abs(profit):,.2f}
+                                </div>
+                            </div>
+                        </div>
+                        <div style="background:#111820;border-radius:8px;padding:14px 18px;">
+                            <div style="font-size:13px;color:{p_color};font-weight:600;margin-bottom:6px;">
+                                {p_icon} {abs(profit_pct):.1f}% {'Profit' if is_profit else 'Loss'} on ₹10,000 investment
+                            </div>
+                            <div style="font-size:12px;color:#5a6880;line-height:1.7;">
+                                {'✅ RSI strategy ne is stock pe achha kaam kiya. Oversold pe buy aur overbought pe sell karne se ' + f'₹{abs(profit):,.0f} ka faida hua.' if is_profit else
+                                 '⚠ RSI strategy is stock pe effective nahi rahi. ' + f'₹{abs(profit):,.0f} ka nuksan hua. Alag strategy try karo.'}
+                            </div>
+                        </div>
+                        <div style="margin-top:12px;font-size:11px;color:#5a6880;">
+                            ⚠ Disclaimer: Yeh backtest sirf historical data pe hai. Future returns ki guarantee nahi.
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
         with tab4:
             if mode == "Paper Trading":
