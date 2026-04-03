@@ -347,6 +347,8 @@ if "analysis_cache" not in st.session_state:
     st.session_state.analysis_cache = {}  # stock → {df, pred, lstm, news, res}
 if "price_refresh_only" not in st.session_state:
     st.session_state.price_refresh_only = False
+if "analysis_done" not in st.session_state:
+    st.session_state.analysis_done = False
 
 # ── TOP BAR ──
 st.markdown("""
@@ -434,8 +436,15 @@ run_full = analyze_clicked or (
     st.session_state.get("analyzed_stocks")
 )
 
-if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.session_state.analyzed_stocks:
-    is_refresh = st.session_state.get("price_refresh_only", False)
+# Show analysis if: first click, price refresh, OR any button inside (backtest, buy, sell etc)
+_show_analysis = (
+    analyze_clicked or
+    st.session_state.get("price_refresh_only", False) or
+    st.session_state.get("analysis_done", False)
+)
+
+if _show_analysis and st.session_state.analyzed_stocks:
+    is_refresh = st.session_state.get("price_refresh_only", False) and not analyze_clicked
 
     for stock in st.session_state.analyzed_stocks:
 
