@@ -714,40 +714,52 @@ if (analyze_clicked or st.session_state.get("price_refresh_only")) and st.sessio
                 if diff_pct > 0:    reasons.append(f"Model projects +{diff_pct:.2f}% upside")
                 else:               reasons.append(f"Model projects {diff_pct:.2f}% downside")
 
-                range_html = f"""
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
-                        <div class="stat-mini"><div class="stat-mini-label">Conservative Target</div>
-                        <div class="stat-mini-val" style="color:#00e5a0">₹{low_target:,.2f}</div></div>
-                        <div class="stat-mini"><div class="stat-mini-label">Optimistic Target</div>
-                        <div class="stat-mini-val" style="color:#ffa726">₹{high_target:,.2f}</div></div>
-                    </div>""" if has_range else ""
+                                # Build HTML strings separately — avoid nested f-string issues
+                if has_range:
+                    range_section = (
+                        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">'
+                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 16px;text-align:center;">'
+                        '<div style="font-size:10px;color:#5a6880;text-transform:uppercase;letter-spacing:1px;">Conservative</div>'
+                        f'<div style="font-family:Space Mono,monospace;font-size:16px;font-weight:700;color:#00e5a0;margin-top:4px;">&#8377;{low_target:,.2f}</div>'
+                        '</div>'
+                        '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 16px;text-align:center;">'
+                        '<div style="font-size:10px;color:#5a6880;text-transform:uppercase;letter-spacing:1px;">Optimistic</div>'
+                        f'<div style="font-family:Space Mono,monospace;font-size:16px;font-weight:700;color:#ffa726;margin-top:4px;">&#8377;{high_target:,.2f}</div>'
+                        '</div>'
+                        '</div>'
+                    )
+                else:
+                    range_section = ""
 
-                reasons_html = "".join([
-                    f'<div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;">'
-                    f'<span style="color:{sig_color};font-size:10px;margin-top:2px;">▸</span>'
-                    f'<span style="font-size:12px;color:#9aa5b8;">{r}</span></div>'
-                    for r in reasons
-                ])
+                reasons_section = ""
+                for r in reasons:
+                    reasons_section += (
+                        '<div style="display:flex;gap:8px;align-items:flex-start;margin-top:8px;">'
+                        f'<span style="color:{sig_color};font-size:11px;margin-top:1px;flex-shrink:0;">&#9658;</span>'
+                        f'<span style="font-size:13px;color:#9aa5b8;">{r}</span>'
+                        '</div>'
+                    )
 
-                st.markdown(f"""
-                <div class="card">
-                    <div class="card-title">AI Signal · Ensemble Model</div>
-                    <div style="background:{sig_bg};border:1px solid {sig_bdr};border-radius:10px;padding:16px 20px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;">
-                            <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:{sig_color}">{signal_label}</div>
-                            <div style="text-align:right;">
-                                <div style="font-family:'Space Mono',monospace;font-size:18px;font-weight:700;color:{sig_color}">₹{pred:,.2f}</div>
-                                <div style="font-family:'Space Mono',monospace;font-size:12px;color:#5a6880">{diff_pct:+.2f}%</div>
-                            </div>
-                        </div>
-                        {range_html}
-                    </div>
-                    <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;">
-                        <div style="font-family:'Space Mono',monospace;font-size:10px;color:#5a6880;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Why this signal?</div>
-                        {reasons_html}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                signal_html = (
+                    '<div class="card">'
+                    '<div class="card-title">AI Signal &middot; Ensemble Model</div>'
+                    f'<div style="background:{sig_bg};border:1px solid {sig_bdr};border-radius:10px;padding:16px 20px;">'
+                    '<div style="display:flex;align-items:center;justify-content:space-between;">'
+                    f'<div style="font-family:Syne,sans-serif;font-size:28px;font-weight:800;color:{sig_color};">{signal_label}</div>'
+                    '<div style="text-align:right;">'
+                    f'<div style="font-family:Space Mono,monospace;font-size:18px;font-weight:700;color:{sig_color};">&#8377;{pred:,.2f}</div>'
+                    f'<div style="font-family:Space Mono,monospace;font-size:12px;color:#5a6880;">{diff_pct:+.2f}%</div>'
+                    '</div>'
+                    '</div>'
+                    + range_section +
+                    '</div>'
+                    '<div style="margin-top:14px;border-top:1px solid rgba(255,255,255,0.05);padding-top:12px;">'
+                    '<div style="font-family:Space Mono,monospace;font-size:10px;color:#5a6880;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Why this signal?</div>'
+                    + reasons_section +
+                    '</div>'
+                    '</div>'
+                )
+                st.markdown(signal_html, unsafe_allow_html=True)
 
             # ── RISK CARD ──
             st.markdown(f"""
