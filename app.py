@@ -29,7 +29,7 @@ st.set_page_config(
     page_title="QuantEdge — AI Trading",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # ── GLOBAL CSS ──
@@ -336,6 +336,47 @@ hr { border-color: rgba(255,255,255,0.06) !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# ── USER LOGIN ──
+USERS = {
+    "admin": "quantedge123",   # username: password
+    "trader": "trade2024",     # add more users here
+}
+
+def check_login():
+    if st.session_state.get("logged_in"):
+        return True
+    
+    st.markdown("""
+    <div style="max-width:400px;margin:80px auto;padding:40px;
+                background:#0d1117;border:1px solid rgba(255,255,255,0.07);
+                border-radius:16px;text-align:center;">
+        <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;
+                    color:#e8edf5;margin-bottom:4px;">Quant<span style='color:#00e5a0'>Edge</span></div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;
+                    margin-bottom:32px;">AI Trading Intelligence</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_l, col_m, col_r = st.columns([1, 2, 1])
+    with col_m:
+        st.markdown("### Login")
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        
+        if st.button("Login →", key="login_btn"):
+            if username in USERS and USERS[username] == password:
+                st.session_state.logged_in = True
+                st.session_state.username  = username
+                st.rerun()
+            else:
+                st.error("❌ Wrong username or password")
+        
+        st.caption("Demo: admin / quantedge123")
+    return False
+
+if not check_login():
+    st.stop()
+
 # ── SESSION STATE ──
 if "portfolio" not in st.session_state:
     st.session_state.portfolio = init_portfolio()
@@ -355,16 +396,30 @@ if "compare_stock" not in st.session_state:
     st.session_state.compare_stock = ""
 
 # ── TOP BAR ──
-st.markdown("""
-<div class="top-bar">
-    <div class="top-bar-inner">
-        <div class="logo-text">Quant<span>Edge</span></div>
-        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
-            AI Trading Intelligence · NSE/BSE
+tb_col1, tb_col2 = st.columns([6, 1])
+with tb_col1:
+    st.markdown("""
+    <div class="top-bar">
+        <div class="top-bar-inner">
+            <div class="logo-text">Quant<span>Edge</span></div>
+            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
+                AI Trading Intelligence · NSE/BSE
+            </div>
         </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+with tb_col2:
+    uname = st.session_state.get("username", "user")
+    st.markdown(f"""
+    <div style="padding:14px 0 10px 0;text-align:right;
+                font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
+        👤 {uname}
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Logout", key="logout_btn"):
+        st.session_state.logged_in = False
+        st.session_state.username  = ""
+        st.rerun()
 
 # ── LIVE TICKER ──
 movers = get_top_movers()
@@ -376,6 +431,99 @@ if movers:
         ticker_html += f'<span><span class="t-sym">{s}</span> &nbsp;<span class="t-price">—</span>&nbsp;<span class="{cls}">{arrow} {abs(c):.2f}%</span></span>'
     ticker_html += '</div></div>'
     st.markdown(ticker_html, unsafe_allow_html=True)
+
+# ── SIDEBAR: NSE Calendar + Multi-timeframe toggle ──
+with st.sidebar:
+    st.markdown("""
+    <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:18px;
+                color:#e8edf5;margin-bottom:20px;">⚙ Settings</div>
+    """, unsafe_allow_html=True)
+
+    # Multi-timeframe toggle
+    st.markdown("### 📊 Multi-Timeframe")
+    multi_tf = st.toggle("Show 4 timeframes at once", value=False,
+                          help="Ek stock ke 4 timeframes ek saath dikhao")
+    st.caption("Analyze mein 1 stock honi chahiye")
+
+    st.divider()
+
+    # NSE Calendar
+    st.markdown("### 📅 NSE Events Calendar")
+
+    import datetime as _dt
+    _today = _dt.date.today()
+    _month = _today.month
+    _year  = _today.year
+
+    # Key NSE events (static + computed)
+    NSE_EVENTS = [
+        # Monthly expiry — last Thursday of month
+        # Q results season — Jan, Apr, Jul, Oct
+        {"date": "2025-04-24", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2025-04-30", "event": "Sensex Rebalancing", "type": "index"},
+        {"date": "2025-05-29", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2025-06-26", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2025-07-31", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2026-01-29", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2026-02-26", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2026-03-26", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2026-04-23", "event": "Monthly F&O Expiry", "type": "expiry"},
+        {"date": "2026-04-01", "event": "Q4 Results Season Start", "type": "results"},
+        {"date": "2026-07-01", "event": "Q1 Results Season Start", "type": "results"},
+        {"date": "2026-10-01", "event": "Q2 Results Season Start", "type": "results"},
+        {"date": "2026-01-01", "event": "Q3 Results Season Start", "type": "results"},
+        {"date": "2026-02-01", "event": "Union Budget 2026", "type": "budget"},
+        {"date": "2025-12-25", "event": "Christmas Holiday", "type": "holiday"},
+        {"date": "2026-01-26", "event": "Republic Day Holiday", "type": "holiday"},
+        {"date": "2026-03-18", "event": "Holi Holiday", "type": "holiday"},
+        {"date": "2026-04-14", "event": "Dr. Ambedkar Jayanti", "type": "holiday"},
+    ]
+
+    _type_color = {
+        "expiry":  "#ffa726",
+        "results": "#00e5a0",
+        "budget":  "#7c4dff",
+        "holiday": "#ff4560",
+        "index":   "#00bfff",
+    }
+    _type_icon = {
+        "expiry":  "⚡",
+        "results": "📊",
+        "budget":  "🏛",
+        "holiday": "🎉",
+        "index":   "📈",
+    }
+
+    # Show upcoming 6 events
+    _upcoming = []
+    for ev in NSE_EVENTS:
+        try:
+            _ev_date = _dt.date.fromisoformat(ev["date"])
+            if _ev_date >= _today:
+                _days_left = (_ev_date - _today).days
+                _upcoming.append({**ev, "date_obj": _ev_date, "days": _days_left})
+        except Exception:
+            pass
+
+    _upcoming = sorted(_upcoming, key=lambda x: x["days"])[:8]
+
+    for ev in _upcoming:
+        _col = _type_color.get(ev["type"], "#5a6880")
+        _icon = _type_icon.get(ev["type"], "•")
+        _days = ev["days"]
+        _days_txt = "Today!" if _days == 0 else f"in {_days}d"
+        st.markdown(
+            f'<div style="border-left:3px solid {_col};padding:8px 10px;'
+            f'margin-bottom:8px;background:rgba(255,255,255,0.02);border-radius:0 6px 6px 0;">'
+            f'<div style="font-family:Space Mono,monospace;font-size:10px;color:{_col}">'
+            f'{_icon} {ev["date"]} · {_days_txt}</div>'
+            f'<div style="font-size:12px;color:#e8edf5;margin-top:2px;">{ev["event"]}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
+    st.divider()
+    st.caption("⚡ Expiry · 📊 Results · 🏛 Budget · 🎉 Holiday")
 
 # ── WATCHLIST DASHBOARD ──
 with st.expander("📋 Watchlist", expanded=True):
@@ -491,9 +639,84 @@ _show_analysis = (
 )
 
 if _show_analysis and st.session_state.analyzed_stocks:
-    # is_refresh = True jab bhi koi button click ho (backtest, buy, sell, auto refresh)
-    # False sirf tab jab Analyze button click ho
     is_refresh = not analyze_clicked and st.session_state.get("analysis_done", False)
+
+    # ── MULTI-TIMEFRAME MODE ──
+    if multi_tf and len(st.session_state.analyzed_stocks) == 1:
+        _mtf_stock = st.session_state.analyzed_stocks[0]
+        st.markdown(f"""
+        <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;
+                    color:#e8edf5;margin:24px 0 16px 0;">
+            📊 {_mtf_stock} — Multi-Timeframe View
+        </div>
+        """, unsafe_allow_html=True)
+
+        _tf_list = [
+            ("1 Day",   "1d",  "5m"),
+            ("5 Days",  "5d",  "15m"),
+            ("1 Month", "1mo", "1h"),
+            ("3 Month", "3mo", "1d"),
+        ]
+        _mtf_cols = st.columns(2)
+        for _idx, (_label, _per, _ivl) in enumerate(_tf_list):
+            with _mtf_cols[_idx % 2]:
+                with st.spinner(f"{_label}..."):
+                    _df_mtf, _ = get_live_data(_mtf_stock, period=_per, interval=_ivl)
+
+                if _df_mtf is not None and len(_df_mtf) > 5:
+                    try:
+                        _ist = pytz.timezone('Asia/Kolkata')
+                        if _df_mtf.index.tzinfo is None:
+                            _df_mtf.index = _df_mtf.index.tz_localize('UTC').tz_convert(_ist)
+                        else:
+                            _df_mtf.index = _df_mtf.index.tz_convert(_ist)
+                        _df_mtf.index = _df_mtf.index.tz_localize(None)
+                    except Exception:
+                        pass
+
+                    _fig_mtf = go.Figure()
+                    _is_up_mtf = float(_df_mtf['Close'].squeeze().iloc[-1]) >= float(_df_mtf['Close'].squeeze().iloc[0])
+                    _c_mtf = '#00e5a0' if _is_up_mtf else '#ff4560'
+
+                    _fig_mtf.add_trace(go.Candlestick(
+                        x=_df_mtf.index,
+                        open=_df_mtf['Open'].squeeze(),
+                        high=_df_mtf['High'].squeeze(),
+                        low=_df_mtf['Low'].squeeze(),
+                        close=_df_mtf['Close'].squeeze(),
+                        name=_label,
+                        increasing=dict(line=dict(color='#00e5a0'), fillcolor='#00e5a0'),
+                        decreasing=dict(line=dict(color='#ff4560'), fillcolor='#ff4560'),
+                    ))
+
+                    _fig_mtf.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor='#0d1117',
+                        plot_bgcolor='#0d1117',
+                        height=280,
+                        title=dict(text=f"{_label}", font=dict(size=13, color='#9aa5b8')),
+                        margin=dict(l=0, r=0, t=36, b=0),
+                        xaxis_rangeslider_visible=False,
+                        showlegend=False,
+                        font=dict(family='DM Sans', color='#9aa5b8'),
+                    )
+                    _xtype = 'category' if _ivl in ['5m', '15m'] else 'date'
+                    _fig_mtf.update_xaxes(type=_xtype, nticks=8, tickfont=dict(size=8),
+                                          gridcolor='rgba(255,255,255,0.03)')
+                    _fig_mtf.update_yaxes(gridcolor='rgba(255,255,255,0.03)',
+                                          tickfont=dict(size=8))
+                    st.plotly_chart(_fig_mtf, use_container_width=True)
+
+                    # Quick stats
+                    _ret = (float(_df_mtf['Close'].squeeze().iloc[-1]) -
+                            float(_df_mtf['Close'].squeeze().iloc[0])) / float(_df_mtf['Close'].squeeze().iloc[0]) * 100
+                    st.markdown(
+                        f'<div style="font-family:Space Mono,monospace;font-size:11px;'
+                        f'color:{"#00e5a0" if _ret>=0 else "#ff4560"};text-align:center;'
+                        f'margin-bottom:16px;">{"▲" if _ret>=0 else "▼"} {abs(_ret):.2f}% this period</div>',
+                        unsafe_allow_html=True
+                    )
+        st.divider()
 
     for stock in st.session_state.analyzed_stocks:
 
