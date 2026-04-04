@@ -444,7 +444,9 @@ _show_analysis = (
 )
 
 if _show_analysis and st.session_state.analyzed_stocks:
-    is_refresh = st.session_state.get("price_refresh_only", False) and not analyze_clicked
+    # is_refresh = True jab bhi koi button click ho (backtest, buy, sell, auto refresh)
+    # False sirf tab jab Analyze button click ho
+    is_refresh = not analyze_clicked and st.session_state.get("analysis_done", False)
 
     for stock in st.session_state.analyzed_stocks:
 
@@ -457,16 +459,21 @@ if _show_analysis and st.session_state.analyzed_stocks:
         </div>
         """, unsafe_allow_html=True)
 
-        # ── FETCH DATA ──
-        with st.spinner(f"Fetching {stock}..."):
-            df, source = get_live_data(stock, period=period, interval=interval)
-        
-        # Cache df for refresh
-        if df is not None:
-            if stock not in st.session_state.analysis_cache:
-                st.session_state.analysis_cache[stock] = {}
-            st.session_state.analysis_cache[stock]['df'] = df
-            st.session_state.analysis_cache[stock]['interval'] = interval
+        # ── FETCH DATA — use cache on non-analyze reruns ──
+        cached_df = st.session_state.analysis_cache.get(stock, {}).get('df')
+
+        if analyze_clicked or cached_df is None:
+            # Fresh fetch only on Analyze click or first time
+            with st.spinner(f"Fetching {stock}..."):
+                df, source = get_live_data(stock, period=period, interval=interval)
+            if df is not None:
+                if stock not in st.session_state.analysis_cache:
+                    st.session_state.analysis_cache[stock] = {}
+                st.session_state.analysis_cache[stock]['df']       = df
+                st.session_state.analysis_cache[stock]['interval'] = interval
+        else:
+            # Use cached data — no fetch needed (backtest/buy/sell button click)
+            df = cached_df
 
         if df is None:
             st.error(f"❌ Data unavailable for {stock}")
