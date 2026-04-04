@@ -467,6 +467,7 @@ if analyze_clicked:
         if s.upper().endswith(".BSE"): s = s.replace(".BSE", ".BO")
         normalized.append(s.strip().upper())
     st.session_state.analyzed_stocks = normalized
+    st.session_state.analysis_done = True  # ✅ analysis complete flag
 
 tf_map = {
     "1 Day (5m)":   ("1d",  "5m"),
