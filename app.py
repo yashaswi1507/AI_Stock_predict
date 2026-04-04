@@ -349,6 +349,10 @@ if "price_refresh_only" not in st.session_state:
     st.session_state.price_refresh_only = False
 if "analysis_done" not in st.session_state:
     st.session_state.analysis_done = False
+if "watchlist" not in st.session_state:
+    st.session_state.watchlist = ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS"]
+if "compare_stock" not in st.session_state:
+    st.session_state.compare_stock = ""
 
 # ── TOP BAR ──
 st.markdown("""
@@ -372,6 +376,48 @@ if movers:
         ticker_html += f'<span><span class="t-sym">{s}</span> &nbsp;<span class="t-price">—</span>&nbsp;<span class="{cls}">{arrow} {abs(c):.2f}%</span></span>'
     ticker_html += '</div></div>'
     st.markdown(ticker_html, unsafe_allow_html=True)
+
+# ── WATCHLIST DASHBOARD ──
+with st.expander("📋 Watchlist", expanded=True):
+    wl_col1, wl_col2 = st.columns([4, 1])
+    with wl_col1:
+        wl_input = st.text_input("Add stock to watchlist", "", 
+                                  placeholder="e.g. SBIN.NS",
+                                  label_visibility="collapsed",
+                                  key="wl_input")
+    with wl_col2:
+        if st.button("+ Add", key="wl_add"):
+            s = wl_input.strip().upper()
+            if s and s not in st.session_state.watchlist:
+                st.session_state.watchlist.append(s)
+
+    if st.session_state.watchlist:
+        wl_cols = st.columns(len(st.session_state.watchlist))
+        for i, sym in enumerate(st.session_state.watchlist):
+            with wl_cols[i]:
+                live = get_current_price(sym)
+                if live:
+                    arrow = "▲" if live["pChange"] >= 0 else "▼"
+                    col = "#00e5a0" if live["pChange"] >= 0 else "#ff4560"
+                    st.markdown(
+                        f'<div class="card" style="text-align:center;padding:12px 8px;">'
+                        f'<div style="font-family:Space Mono,monospace;font-size:10px;color:#5a6880">{sym.replace(".NS","")}</div>'
+                        f'<div style="font-family:Syne,sans-serif;font-size:18px;font-weight:800;margin:4px 0">&#8377;{live["price"]:,.2f}</div>'
+                        f'<div style="font-family:Space Mono,monospace;font-size:11px;color:{col}">{arrow} {live["pChange"]:.2f}%</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown(
+                        f'<div class="card" style="text-align:center;padding:12px 8px;">'
+                        f'<div style="font-family:Space Mono,monospace;font-size:10px;color:#5a6880">{sym.replace(".NS","")}</div>'
+                        f'<div style="font-size:12px;color:#5a6880;margin-top:6px;">N/A</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+                if st.button("✕", key=f"wl_rm_{sym}", help=f"Remove {sym}"):
+                    st.session_state.watchlist.remove(sym)
+                    st.rerun()
 
 # ── CONTROL PANEL ──
 with st.container():
@@ -562,6 +608,53 @@ if _show_analysis and st.session_state.analyzed_stocks:
                     mode='lines', line=dict(color='#ef5350', width=1.2, dash='dot'),
                     name="MA50", opacity=0.8
                 ), row=1, col=1)
+
+            # ── SUPPORT & RESISTANCE auto-detect ──
+            try:
+                _close = df['Close'].squeeze()
+                _high  = df['High'].squeeze()  if 'High'  in df.columns else _close
+                _low   = df['Low'].squeeze()   if 'Low'   in df.columns else _close
+                _n     = min(len(df), 60)
+
+                _supports, _resistances = [], []
+                for i in range(2, _n - 2):
+                    if (_low.iloc[i] < _low.iloc[i-1] and _low.iloc[i] < _low.iloc[i-2] and
+                        _low.iloc[i] < _low.iloc[i+1] and _low.iloc[i] < _low.iloc[i+2]):
+                        _supports.append(float(_low.iloc[i]))
+                    if (_high.iloc[i] > _high.iloc[i-1] and _high.iloc[i] > _high.iloc[i-2] and
+                        _high.iloc[i] > _high.iloc[i+1] and _high.iloc[i] > _high.iloc[i+2]):
+                        _resistances.append(float(_high.iloc[i]))
+
+                def _cluster(levels, tol=0.005):
+                    if not levels: return []
+                    levels = sorted(set(levels))
+                    clustered, group = [], [levels[0]]
+                    for lv in levels[1:]:
+                        if (lv - group[-1]) / group[-1] < tol:
+                            group.append(lv)
+                        else:
+                            clustered.append(sum(group)/len(group))
+                            group = [lv]
+                    clustered.append(sum(group)/len(group))
+                    return clustered[-3:]
+
+                for _lv in _cluster(_supports):
+                    fig.add_hline(y=_lv, line_dash="dash", line_color="#00e5a0",
+                                  line_width=1, opacity=0.5,
+                                  annotation_text=f"S ₹{_lv:,.0f}",
+                                  annotation_position="left",
+                                  annotation_font=dict(size=10, color="#00e5a0"),
+                                  row=1, col=1)
+
+                for _lv in _cluster(_resistances):
+                    fig.add_hline(y=_lv, line_dash="dash", line_color="#ff4560",
+                                  line_width=1, opacity=0.5,
+                                  annotation_text=f"R ₹{_lv:,.0f}",
+                                  annotation_position="left",
+                                  annotation_font=dict(size=10, color="#ff4560"),
+                                  row=1, col=1)
+            except Exception as _e:
+                print(f"[S/R] {_e}")
 
             if has_volume:
                 fig.add_trace(go.Bar(
@@ -792,8 +885,47 @@ if _show_analysis and st.session_state.analyzed_stocks:
             </div>
             """, unsafe_allow_html=True)
 
+            # ── 52W HIGH/LOW ──
+            try:
+                import yfinance as _yf
+                _ticker = _yf.Ticker(stock)
+                _info   = _ticker.fast_info
+                _52h = getattr(_info, 'year_high', None)
+                _52l = getattr(_info, 'year_low',  None)
+                _cp  = float(df['Close'].squeeze().iloc[-1])
+
+                if _52h and _52l:
+                    _pct_from_high = ((_cp - _52h) / _52h) * 100
+                    _pct_from_low  = ((_cp - _52l) / _52l) * 100
+                    _range_pct     = ((_cp - _52l) / (_52h - _52l)) * 100 if _52h != _52l else 50
+
+                    st.markdown(
+                        '<div class="card">'
+                        '<div class="card-title">52 Week Range</div>'
+                        f'<div style="display:flex;justify-content:space-between;font-family:Space Mono,monospace;font-size:11px;margin-bottom:8px;">'
+                        f'<span style="color:#ff4560">L &#8377;{_52l:,.2f}</span>'
+                        f'<span style="color:#5a6880">Current &#8377;{_cp:,.2f}</span>'
+                        f'<span style="color:#00e5a0">H &#8377;{_52h:,.2f}</span>'
+                        f'</span></div>'
+                        f'<div style="background:#111820;border-radius:4px;height:8px;margin:8px 0;position:relative;">'
+                        f'<div style="position:absolute;left:0;top:0;height:100%;width:{min(_range_pct,100):.1f}%;'
+                        f'background:linear-gradient(90deg,#ff4560,#ffa726,#00e5a0);border-radius:4px;"></div>'
+                        f'<div style="position:absolute;top:-4px;left:calc({min(_range_pct,100):.1f}% - 6px);'
+                        f'width:12px;height:16px;background:#e8edf5;border-radius:3px;"></div>'
+                        f'</div>'
+                        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">'
+                        f'<div class="stat-mini"><div class="stat-mini-label">From 52W High</div>'
+                        f'<div class="stat-mini-val" style="color:#ff4560">{_pct_from_high:.1f}%</div></div>'
+                        f'<div class="stat-mini"><div class="stat-mini-label">From 52W Low</div>'
+                        f'<div class="stat-mini-val" style="color:#00e5a0">+{_pct_from_low:.1f}%</div></div>'
+                        f'</div></div>',
+                        unsafe_allow_html=True
+                    )
+            except Exception as _e:
+                print(f"[52W] {_e}")
+
         # ── TABS FOR DETAILS ──
-        tab1, tab2, tab3, tab4 = st.tabs(["🧠 Deep Learning", "📰 News", "📉 Backtest", "💹 Paper Trade"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["🧠 Deep Learning", "📰 News", "📉 Backtest", "💹 Paper Trade", "📊 Compare"])
 
         with tab1:
             def show_dl_result(lstm_price, curr, cached=False):
@@ -1024,6 +1156,96 @@ if _show_analysis and st.session_state.analyzed_stocks:
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
+
+        with tab5:
+            # ── STOCK COMPARISON ──
+            st.markdown("""
+            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;margin-bottom:12px;">
+                Compare this stock with another — normalized chart (both start at 100%)
+            </div>
+            """, unsafe_allow_html=True)
+
+            cmp_col1, cmp_col2 = st.columns([3, 1])
+            with cmp_col1:
+                compare_input = st.text_input(
+                    "Compare with",
+                    value=st.session_state.compare_stock,
+                    placeholder="e.g. TCS.NS, NIFTY50.NS",
+                    label_visibility="collapsed",
+                    key=f"cmp_{stock}"
+                )
+            with cmp_col2:
+                cmp_clicked = st.button("Compare →", key=f"cmp_btn_{stock}")
+
+            if cmp_clicked and compare_input.strip():
+                cmp_sym = compare_input.strip().upper()
+                st.session_state.compare_stock = cmp_sym
+
+                with st.spinner(f"Fetching {cmp_sym}..."):
+                    df_cmp, _ = get_live_data(cmp_sym, period=period, interval=interval)
+
+                if df_cmp is not None and len(df_cmp) > 5:
+                    # Normalize both to 100 at start
+                    import pytz as _pytz
+                    try:
+                        _ist = _pytz.timezone('Asia/Kolkata')
+                        if df_cmp.index.tzinfo is None:
+                            df_cmp.index = df_cmp.index.tz_localize('UTC').tz_convert(_ist)
+                        else:
+                            df_cmp.index = df_cmp.index.tz_convert(_ist)
+                        df_cmp.index = df_cmp.index.tz_localize(None)
+                    except Exception:
+                        pass
+
+                    _s1 = df['Close'].squeeze()
+                    _s2 = df_cmp['Close'].squeeze()
+
+                    _n1 = (_s1 / _s1.iloc[0]) * 100
+                    _n2 = (_s2 / _s2.iloc[0]) * 100
+
+                    fig_cmp = go.Figure()
+                    fig_cmp.add_trace(go.Scatter(
+                        x=df.index, y=_n1,
+                        mode='lines', name=stock,
+                        line=dict(color='#00e5a0', width=2)
+                    ))
+                    fig_cmp.add_trace(go.Scatter(
+                        x=df_cmp.index, y=_n2,
+                        mode='lines', name=cmp_sym,
+                        line=dict(color='#ffa726', width=2)
+                    ))
+                    fig_cmp.add_hline(y=100, line_dash="dot",
+                                      line_color="#5a6880", line_width=1)
+
+                    fig_cmp.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor='#0d1117',
+                        plot_bgcolor='#0d1117',
+                        height=400,
+                        margin=dict(l=0, r=0, t=30, b=0),
+                        hovermode='x unified',
+                        yaxis_title="Normalized Price (Base=100)",
+                        font=dict(family='DM Sans', color='#9aa5b8'),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.01,
+                                   bgcolor='rgba(0,0,0,0)')
+                    )
+                    st.plotly_chart(fig_cmp, use_container_width=True)
+
+                    # Performance comparison
+                    _ret1 = (float(_s1.iloc[-1]) - float(_s1.iloc[0])) / float(_s1.iloc[0]) * 100
+                    _ret2 = (float(_s2.iloc[-1]) - float(_s2.iloc[0])) / float(_s2.iloc[0]) * 100
+                    _winner = stock if _ret1 > _ret2 else cmp_sym
+
+                    c_a, c_b, c_c = st.columns(3)
+                    c_a.metric(f"{stock} Return", f"{_ret1:+.2f}%")
+                    c_b.metric(f"{cmp_sym} Return", f"{_ret2:+.2f}%")
+                    c_c.metric("Winner 🏆", _winner.replace(".NS",""))
+                else:
+                    st.error(f"Could not fetch data for {cmp_sym}")
+            elif st.session_state.compare_stock:
+                st.info(f"Press 'Compare →' to compare {stock} with {st.session_state.compare_stock}")
+            else:
+                st.info("Stock symbol daalo aur Compare dabao — dono ka normalized performance ek chart pe dikhega")
 
         with tab4:
             if mode == "Paper Trading":
