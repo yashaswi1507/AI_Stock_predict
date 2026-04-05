@@ -336,46 +336,7 @@ hr { border-color: rgba(255,255,255,0.06) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── USER LOGIN ──
-USERS = {
-    "admin": "quantedge123",   # username: password
-    "trader": "trade2024",     # add more users here
-}
 
-def check_login():
-    if st.session_state.get("logged_in"):
-        return True
-    
-    st.markdown("""
-    <div style="max-width:400px;margin:80px auto;padding:40px;
-                background:#0d1117;border:1px solid rgba(255,255,255,0.07);
-                border-radius:16px;text-align:center;">
-        <div style="font-family:'Syne',sans-serif;font-size:28px;font-weight:800;
-                    color:#e8edf5;margin-bottom:4px;">Quant<span style='color:#00e5a0'>Edge</span></div>
-        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880;
-                    margin-bottom:32px;">AI Trading Intelligence</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_l, col_m, col_r = st.columns([1, 2, 1])
-    with col_m:
-        st.markdown("### Login")
-        username = st.text_input("Username", key="login_user")
-        password = st.text_input("Password", type="password", key="login_pass")
-        
-        if st.button("Login →", key="login_btn"):
-            if username in USERS and USERS[username] == password:
-                st.session_state.logged_in = True
-                st.session_state.username  = username
-                st.rerun()
-            else:
-                st.error("❌ Wrong username or password")
-        
-        st.caption("Demo: admin / quantedge123")
-    return False
-
-if not check_login():
-    st.stop()
 
 # ── SESSION STATE ──
 if "portfolio" not in st.session_state:
@@ -396,30 +357,16 @@ if "compare_stock" not in st.session_state:
     st.session_state.compare_stock = ""
 
 # ── TOP BAR ──
-tb_col1, tb_col2 = st.columns([6, 1])
-with tb_col1:
-    st.markdown("""
-    <div class="top-bar">
-        <div class="top-bar-inner">
-            <div class="logo-text">Quant<span>Edge</span></div>
-            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
-                AI Trading Intelligence · NSE/BSE
-            </div>
+st.markdown("""
+<div class="top-bar">
+    <div class="top-bar-inner">
+        <div class="logo-text">Quant<span>Edge</span></div>
+        <div style="font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
+            AI Trading Intelligence · NSE/BSE
         </div>
     </div>
-    """, unsafe_allow_html=True)
-with tb_col2:
-    uname = st.session_state.get("username", "user")
-    st.markdown(f"""
-    <div style="padding:14px 0 10px 0;text-align:right;
-                font-family:'Space Mono',monospace;font-size:11px;color:#5a6880">
-        👤 {uname}
-    </div>
-    """, unsafe_allow_html=True)
-    if st.button("Logout", key="logout_btn"):
-        st.session_state.logged_in = False
-        st.session_state.username  = ""
-        st.rerun()
+</div>
+""", unsafe_allow_html=True)
 
 # ── LIVE TICKER ──
 movers = get_top_movers()
